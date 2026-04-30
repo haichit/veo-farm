@@ -1,0 +1,30 @@
+{
+  "name": "veo-farm",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI video workflow builder — drag-drop nodes, plugin-based, web-account login",
+  "author": "Hai Phan <phanhai.work@gmail.com>",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "db:migrate": "supabase db push",
+    "db:reset": "supabase db reset",
+    "worker:dev": "pnpm --filter @veo-farm/worker dev",
+    "web:dev": "pnpm --filter @veo-farm/web dev"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0",
+    "prettier": "^3.2.0"
+  }
+}

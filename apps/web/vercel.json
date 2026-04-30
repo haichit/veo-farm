@@ -1,0 +1,6 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "cd ../.. && pnpm install --frozen-lockfile && pnpm --filter @veo-farm/web build",
+  "outputDirectory": ".next",
+  "installCommand": "echo skip"
+}

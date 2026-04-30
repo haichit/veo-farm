@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Veo Farm Captcha Solver</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <div class="card">
+      <h1>Veo Farm Captcha</h1>
+      <p class="subtitle">reCAPTCHA Enterprise solver</p>
+
+      <label>
+        Captcha Server URL
+        <input id="serverUrl" type="text" placeholder="http://127.0.0.1:3456" />
+      </label>
+
+      <label class="row">
+        <input id="clearGrecaptcha" type="checkbox" />
+        <span>Clear _grecaptcha localStorage on solve</span>
+      </label>
+
+      <button id="save">Save settings</button>
+      <p id="status"></p>
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>

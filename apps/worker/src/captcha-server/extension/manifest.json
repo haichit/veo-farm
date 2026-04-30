@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Veo Farm Captcha Solver",
+  "version": "1.0.0",
+  "description": "Solve reCAPTCHA Enterprise for Veo 3 Flow API. Talks to local captcha-server via Socket.IO.",
+  "permissions": ["storage", "activeTab", "scripting", "tabs"],
+  "host_permissions": [
+    "https://labs.google/*",
+    "http://localhost:3456/*",
+    "http://127.0.0.1:3456/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://labs.google/*"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["injected.js", "socket.io.min.js"],
+      "matches": ["https://labs.google/*"]
+    }
+  ],
+  "action": {
+    "default_title": "Veo Farm Captcha Solver",
+    "default_popup": "popup.html"
+  }
+}
