@@ -1,0 +1,112 @@
+'use client';
+
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import {
+  Layers3,
+  Key,
+  ListChecks,
+  LayoutDashboard,
+  LogOut,
+  Settings,
+} from 'lucide-react';
+
+interface TopNavProps {
+  email: string;
+}
+
+export function TopNav({ email }: TopNavProps) {
+  const path = usePathname();
+
+  const tabs = [
+    { href: '/', label: 'Dashboard', icon: LayoutDashboard, exact: true },
+    { href: '/flows', label: 'Flows', icon: Layers3 },
+    { href: '/accounts', label: 'Accounts', icon: Key },
+    { href: '/runs', label: 'Runs', icon: ListChecks },
+  ];
+
+  return (
+    <nav
+      className="h-12 px-4 flex items-center justify-between
+                 bg-[rgba(17,17,32,0.85)] backdrop-blur-xl
+                 border-b border-border z-50 relative"
+    >
+      <div className="flex items-center gap-1.5">
+        <span className="text-xl">🎬</span>
+        <span className="text-sm font-bold tracking-tight bg-gradient-to-br from-text-primary to-[#a78bfa] bg-clip-text text-transparent">
+          Veo Farm
+        </span>
+        <div className="w-px h-5 bg-border mx-2" />
+
+        {tabs.map((tab) => {
+          const active = tab.exact ? path === tab.href : path?.startsWith(tab.href);
+          const Icon = tab.icon;
+          return (
+            <Link
+              key={tab.href}
+              href={tab.href}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all
+                ${
+                  active
+                    ? 'bg-accent-glow border border-glass-border text-text-primary'
+                    : 'text-text-muted hover:text-text-secondary hover:bg-white/[0.04]'
+                }`}
+            >
+              <Icon className="w-4 h-4" />
+              {tab.label}
+            </Link>
+          );
+        })}
+      </div>
+
+      <div className="flex items-center gap-2">
+        <ConnectionBadge />
+        <span
+          className="hidden sm:inline-block text-[11px] text-text-muted max-w-[180px] truncate"
+          title={email}
+        >
+          {email}
+        </span>
+        <button
+          type="button"
+          className="w-9 h-9 rounded-lg flex items-center justify-center text-text-muted hover:text-text-secondary hover:bg-white/[0.06] transition-all border border-transparent hover:border-border"
+          aria-label="Settings"
+        >
+          <Settings className="w-4 h-4" />
+        </button>
+        <form action="/auth/signout" method="post">
+          <button
+            type="submit"
+            className="w-9 h-9 rounded-lg flex items-center justify-center text-text-muted hover:text-error hover:bg-error-bg transition-all border border-transparent hover:border-error/30"
+            aria-label="Sign out"
+            title="Sign out"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        </form>
+      </div>
+    </nav>
+  );
+}
+
+function ConnectionBadge() {
+  // TODO(sprint-9): wire to Supabase realtime / worker heartbeat
+  const connected = true;
+  return (
+    <div
+      className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium border
+        ${
+          connected
+            ? 'bg-success-bg border-success/30 text-success'
+            : 'bg-white/[0.03] border-border text-text-muted'
+        }`}
+    >
+      <span
+        className={`w-1.5 h-1.5 rounded-full ${
+          connected ? 'bg-success shadow-[0_0_6px_currentColor]' : 'bg-text-muted'
+        }`}
+      />
+      {connected ? 'Worker online' : 'Chưa kết nối'}
+    </div>
+  );
+}

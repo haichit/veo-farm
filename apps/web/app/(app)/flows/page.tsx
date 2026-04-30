@@ -60,7 +60,7 @@ export default function FlowsPage() {
       {loading ? (
         <p className="text-muted-foreground text-sm">Đang load...</p>
       ) : flows.length === 0 ? (
-        <p className="text-muted-foreground text-sm">Chưa có flow nào. Bấm "Tạo flow mới" để bắt đầu.</p>
+        <p className="text-muted-foreground text-sm">Chưa có flow nào. Bấm &quot;Tạo flow mới&quot; để bắt đầu.</p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {flows.map((f) => (
