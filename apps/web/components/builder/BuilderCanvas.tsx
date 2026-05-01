@@ -10,7 +10,7 @@ import {
   type Connection,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { useFlowStore } from '@/lib/builder/flow-store';
 import { useKeyboardShortcuts } from '@/lib/builder/use-keyboard-shortcuts';
 import { useJobSubscription } from '@/lib/builder/use-job-subscription';
@@ -37,16 +37,24 @@ export function BuilderCanvas() {
   useJobSubscription(currentJobId);
 
   const { screenToFlowPosition } = useReactFlow();
+  const wrapperRef = useRef<HTMLDivElement>(null);
 
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     e.dataTransfer.dropEffect = 'copy';
   }, []);
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
-      const type = e.dataTransfer.getData(PALETTE_DRAG_MIME) as BuilderNodeType;
+      e.stopPropagation();
+      // Try the custom MIME first; fall back to text/plain for browsers that
+      // strip non-standard types during drag.
+      const raw =
+        e.dataTransfer.getData(PALETTE_DRAG_MIME) ||
+        e.dataTransfer.getData('text/plain');
+      const type = raw as BuilderNodeType;
       if (!type || !NODE_TYPES[type]) return;
       const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
       addNode(type, position);
@@ -64,8 +72,16 @@ export function BuilderCanvas() {
   );
 
   return (
-    <div className="flex-1 relative bg-bg-primary" onDragOver={onDragOver} onDrop={onDrop}>
+    <div
+      ref={wrapperRef}
+      className="flex-1 relative bg-bg-primary builder-canvas-wrapper"
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnter={(e) => e.preventDefault()}
+    >
       <ReactFlow
+        onDragOver={onDragOver}
+        onDrop={onDrop}
         nodes={nodes}
         edges={edges}
         onNodesChange={onNodesChange}
