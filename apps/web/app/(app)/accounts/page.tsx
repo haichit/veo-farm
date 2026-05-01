@@ -1,8 +1,8 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2, Key, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { GlassCard } from '@/components/ui/GlassCard';
 import { Badge } from '@/components/ui/badge';
 import { AddAccountModal } from '@/components/account-manager/AddAccountModal';
 
@@ -37,42 +37,84 @@ export default function AccountsPage() {
     load();
   }
 
+  const grouped = items.reduce<Record<string, Account[]>>((acc, a) => {
+    (acc[a.provider_id] ??= []).push(a);
+    return acc;
+  }, {});
+  const providers = Object.keys(grouped).sort();
+
   return (
     <div className="container mx-auto py-8 px-6">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold">Accounts</h1>
-          <p className="text-sm text-muted-foreground">Cookies AI tools (lưu mã hoá AES-256-GCM)</p>
+          <h1 className="text-2xl font-bold text-text-primary">Accounts</h1>
+          <p className="text-sm text-text-muted mt-1">
+            Cookies AI tools (lưu mã hoá AES-256-GCM)
+          </p>
         </div>
-        <Button onClick={() => setOpen(true)}>
+        <Button variant="primary" onClick={() => setOpen(true)}>
           <Plus className="h-4 w-4" /> Thêm account
         </Button>
       </div>
 
       {loading ? (
-        <p className="text-sm text-muted-foreground">Đang load...</p>
+        <p className="text-sm text-text-muted">Đang load...</p>
       ) : items.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Chưa có account nào.</p>
+        <GlassCard className="p-10 text-center">
+          <Key className="w-10 h-10 text-text-muted mx-auto mb-3" />
+          <p className="text-text-secondary text-sm mb-4">
+            Chưa có account nào. Thêm cookies AI tool đầu tiên.
+          </p>
+          <Button variant="primary" onClick={() => setOpen(true)}>
+            <Plus className="h-4 w-4" /> Thêm account đầu tiên
+          </Button>
+        </GlassCard>
       ) : (
-        <div className="space-y-2">
-          {items.map((a) => (
-            <Card key={a.id}>
-              <CardContent className="p-4 flex items-center gap-3">
-                <div className="flex-1">
-                  <div className="font-medium text-sm">{a.label}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {a.provider_id} · added {new Date(a.created_at).toLocaleDateString('vi-VN')}
+        <div className="space-y-6">
+          {providers.map((p) => (
+            <section key={p}>
+              <div className="flex items-center gap-2 mb-2 px-1">
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-text-muted">
+                  {p}
+                </h2>
+                <span className="text-[11px] text-text-muted">({grouped[p].length})</span>
+              </div>
+              <GlassCard className="divide-y divide-border">
+                {grouped[p].map((a) => (
+                  <div
+                    key={a.id}
+                    className="flex items-center gap-3 p-4 transition-colors hover:bg-white/[0.02]"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-accent-glow flex items-center justify-center text-accent shrink-0">
+                      <Key className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm text-text-primary truncate">
+                        {a.label}
+                      </div>
+                      <div className="text-[11px] text-text-muted">
+                        added {new Date(a.created_at).toLocaleDateString('vi-VN')}
+                      </div>
+                      {a.last_error && (
+                        <div className="text-[11px] text-error mt-1 flex items-center gap-1 truncate">
+                          <AlertCircle className="w-3 h-3 shrink-0" />
+                          <span className="truncate">{a.last_error}</span>
+                        </div>
+                      )}
+                    </div>
+                    <Badge status={a.status}>{a.status}</Badge>
+                    <button
+                      type="button"
+                      onClick={() => del(a.id)}
+                      className="p-1.5 rounded-lg text-text-muted hover:text-error hover:bg-error-bg transition-all"
+                      aria-label="Xoá account"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                   </div>
-                  {a.last_error && (
-                    <div className="text-xs text-red-600 mt-1 truncate">⚠ {a.last_error}</div>
-                  )}
-                </div>
-                <Badge status={a.status}>{a.status}</Badge>
-                <button onClick={() => del(a.id)} className="p-1 hover:bg-red-50 rounded">
-                  <Trash2 className="h-4 w-4 text-red-600" />
-                </button>
-              </CardContent>
-            </Card>
+                ))}
+              </GlassCard>
+            </section>
           ))}
         </div>
       )}

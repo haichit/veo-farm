@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -10,6 +11,7 @@ import {
   LogOut,
   Settings,
 } from 'lucide-react';
+import { SettingsModal } from './SettingsModal';
 
 interface TopNavProps {
   email: string;
@@ -17,6 +19,7 @@ interface TopNavProps {
 
 export function TopNav({ email }: TopNavProps) {
   const path = usePathname();
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const tabs = [
     { href: '/', label: 'Dashboard', icon: LayoutDashboard, exact: true },
@@ -69,11 +72,17 @@ export function TopNav({ email }: TopNavProps) {
         </span>
         <button
           type="button"
+          onClick={() => setSettingsOpen(true)}
           className="w-9 h-9 rounded-lg flex items-center justify-center text-text-muted hover:text-text-secondary hover:bg-white/[0.06] transition-all border border-transparent hover:border-border"
           aria-label="Settings"
         >
           <Settings className="w-4 h-4" />
         </button>
+        <SettingsModal
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          email={email}
+        />
         <form action="/auth/signout" method="post">
           <button
             type="submit"

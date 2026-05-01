@@ -15,14 +15,14 @@ export const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      'flex h-9 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50',
+      'flex h-9 w-full items-center justify-between rounded-lg border border-border bg-bg-input px-3 py-1 text-sm text-text-primary shadow-sm transition-colors hover:border-accent/40 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/30 disabled:opacity-50 [&>span]:truncate',
       className,
     )}
     {...props}
   >
     {children}
     <SelectPrimitive.Icon asChild>
-      <ChevronDown className="h-4 w-4 opacity-50" />
+      <ChevronDown className="h-4 w-4 text-text-muted" />
     </SelectPrimitive.Icon>
   </SelectPrimitive.Trigger>
 ));
@@ -36,7 +36,7 @@ export const SelectContent = React.forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       className={cn(
-        'relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-md border bg-background text-foreground shadow-md',
+        'relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-xl border border-glass-border bg-glass backdrop-blur-glass text-text-primary shadow-glass',
         className,
       )}
       position={position}
@@ -55,7 +55,7 @@ export const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      'relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+      'relative flex w-full cursor-pointer select-none items-center rounded-md py-1.5 pl-8 pr-2 text-sm text-text-secondary outline-none transition-colors focus:bg-accent-glow focus:text-text-primary data-[state=checked]:text-accent data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
       className,
     )}
     {...props}

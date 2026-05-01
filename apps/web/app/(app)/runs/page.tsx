@@ -1,7 +1,8 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Card, CardContent } from '@/components/ui/card';
+import { ListChecks, Clock } from 'lucide-react';
+import { GlassCard } from '@/components/ui/GlassCard';
 import { Badge } from '@/components/ui/badge';
 
 interface Run {
@@ -32,29 +33,42 @@ export default function RunsPage() {
 
   return (
     <div className="container mx-auto py-8 px-6">
-      <h1 className="text-2xl font-bold mb-6">Runs</h1>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-text-primary">Runs</h1>
+        <p className="text-sm text-text-muted mt-1">Lịch sử jobs · auto-refresh mỗi 5s</p>
+      </div>
+
       {loading && runs.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Đang load...</p>
+        <p className="text-sm text-text-muted">Đang load...</p>
       ) : runs.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Chưa có run nào.</p>
+        <GlassCard className="p-10 text-center">
+          <ListChecks className="w-10 h-10 text-text-muted mx-auto mb-3" />
+          <p className="text-text-secondary text-sm">Chưa có run nào.</p>
+        </GlassCard>
       ) : (
-        <div className="space-y-2">
+        <GlassCard className="divide-y divide-border">
           {runs.map((r) => (
-            <Link key={r.id} href={`/runs/${r.id}`}>
-              <Card className="hover:bg-accent cursor-pointer">
-                <CardContent className="p-4 flex items-center gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm truncate">{r.input?.idea ?? '(no idea)'}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {new Date(r.created_at).toLocaleString('vi-VN')}
-                    </div>
-                  </div>
-                  <Badge status={r.status}>{r.status}</Badge>
-                </CardContent>
-              </Card>
+            <Link
+              key={r.id}
+              href={`/runs/${r.id}`}
+              className="flex items-center gap-3 p-4 transition-colors hover:bg-white/[0.02]"
+            >
+              <div className="w-10 h-10 rounded-xl bg-accent-glow flex items-center justify-center text-accent shrink-0">
+                <ListChecks className="w-4 h-4" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-medium text-sm text-text-primary truncate">
+                  {r.input?.idea ?? '(no idea)'}
+                </div>
+                <div className="text-[11px] text-text-muted flex items-center gap-1 mt-0.5">
+                  <Clock className="w-3 h-3" />
+                  {new Date(r.created_at).toLocaleString('vi-VN')}
+                </div>
+              </div>
+              <Badge status={r.status}>{r.status}</Badge>
             </Link>
           ))}
-        </div>
+        </GlassCard>
       )}
     </div>
   );
