@@ -79,7 +79,7 @@ export function BuilderCanvas() {
   return (
     <div
       ref={wrapperRef}
-      className="flex-1 relative bg-bg-primary builder-canvas-wrapper"
+      className="absolute inset-0 bg-bg-primary builder-canvas-wrapper"
       onDragOver={onDragOver}
       onDrop={onDrop}
       onDragEnter={(e) => e.preventDefault()}

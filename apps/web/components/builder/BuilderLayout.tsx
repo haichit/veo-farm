@@ -45,9 +45,9 @@ export function BuilderLayout({ sidebar, editor, toolbar, canvas, overlays }: Bu
           </aside>
         )}
 
-        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0 min-h-0">
           {toolbar}
-          <div className="flex-1 relative">{canvas}</div>
+          <div className="flex-1 relative min-h-0">{canvas}</div>
         </div>
 
         {editor && (
