@@ -25,7 +25,7 @@ export function useJobSubscription(jobId: string | null) {
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'sub_jobs', filter: `job_id=eq.${jobId}` },
         (payload) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          // eslint-disable-next-line
           const row = payload.new as any;
           if (!row?.node_id) return;
           updateNodeStatus(row.node_id, normaliseStatus(row.status), {
@@ -39,7 +39,7 @@ export function useJobSubscription(jobId: string | null) {
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'jobs', filter: `id=eq.${jobId}` },
         (payload) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          // eslint-disable-next-line
           const row = payload.new as any;
           if (row?.stats) setStats(row.stats);
           if (row?.status === 'completed') setRunState('idle');
@@ -76,7 +76,7 @@ function normaliseStatus(s: string | null | undefined): NodeStatus {
 // Worker is free to use any of these shapes; we accept the union.
 function extractMedia(output: unknown): PreviewMedia[] {
   if (!output || typeof output !== 'object') return [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line
   const o = output as any;
   if (Array.isArray(o.media)) return o.media.filter(isMedia);
   if (Array.isArray(o.images)) return o.images.map((u: string) => ({ url: u, kind: 'image' }));

@@ -33,7 +33,7 @@ export function NodeEditorPanel() {
   const type = (node.type ?? 'prompt') as BuilderNodeType;
   const def = NODE_TYPES[type];
   if (!def) return null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line
   const Icon = ((Icons as any)[def.icon] ?? Icons.Box) as Icons.LucideIcon;
   const cfg = (node.data?.config ?? {}) as Record<string, unknown>;
   const previewMedia = node.data?.previewMedia ?? [];

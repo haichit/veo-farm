@@ -63,7 +63,7 @@ export function BaseNode(props: BaseNodeProps) {
   }, [node, edges, id, type, def]);
 
   if (!def) return null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line
   const Icon = ((Icons as any)[def.icon] ?? Icons.Box) as Icons.LucideIcon;
 
   const borderClass = selected

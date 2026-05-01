@@ -12,6 +12,8 @@ import {
 import '@xyflow/react/dist/style.css';
 import { useCallback } from 'react';
 import { useFlowStore } from '@/lib/builder/flow-store';
+import { useKeyboardShortcuts } from '@/lib/builder/use-keyboard-shortcuts';
+import { useJobSubscription } from '@/lib/builder/use-job-subscription';
 import { customNodeTypes } from './nodes';
 import { customEdgeTypes } from './edges';
 import { PALETTE_DRAG_MIME } from './NodePalette';
@@ -29,6 +31,10 @@ export function BuilderCanvas() {
   const addNode = useFlowStore((s) => s.addNode);
   const selectNode = useFlowStore((s) => s.selectNode);
   const selectMany = useFlowStore((s) => s.selectMany);
+
+  const currentJobId = useFlowStore((s) => s.currentJobId);
+  useKeyboardShortcuts();
+  useJobSubscription(currentJobId);
 
   const { screenToFlowPosition } = useReactFlow();
 

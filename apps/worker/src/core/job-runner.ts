@@ -23,11 +23,23 @@ import { extractLastFrame } from './last-frame.js';
 
 interface Job {
   id: string;
-  flow_id: string;
+  flow_id: string | null;
+  workflow_id?: string | null;
+  flow_graph?: BuilderJobGraph | null;
   user_id: string;
   input: { idea?: string } | null;
   parent_job_id?: string | null;
   retry_from_node?: string | null;
+}
+
+// Shape stored by /api/run-workflow-builder. Mirrors WorkflowJSON + the
+// pre-computed execution order.
+interface BuilderJobGraph {
+  version: string;
+  name?: string;
+  nodes: Array<{ id: string; type: string; data?: { config?: Record<string, unknown> } }>;
+  edges: Array<{ source: string; target: string }>;
+  executionOrder?: string[];
 }
 
 /**
@@ -71,6 +83,19 @@ export async function runJob(job: Job): Promise<{ outputUrl: string }> {
     { jobId: job.id, parentJobId: job.parent_job_id, retryFrom: job.retry_from_node },
     'runJob start',
   );
+
+  // ─── Builder Canvas runs (Sprint 10) ──────────────────────────────────
+  // These have no flow_id but carry a `flow_graph` snapshot of the new
+  // 10-node taxonomy. Real plugin wiring is Sprint 11+; for now we run a
+  // stub that drives sub_jobs through pending → running → completed so the
+  // UI/Realtime path can be exercised end-to-end.
+  if (!job.flow_id && job.flow_graph) {
+    return runBuilderStub(job);
+  }
+
+  if (!job.flow_id) {
+    throw new Error('Job has no flow_id and no flow_graph — nothing to execute');
+  }
 
   const { data: flow, error } = await supabase().from('flows').select('graph').eq('id', job.flow_id).single();
   if (error || !flow) throw new Error(`Cannot load flow: ${error?.message}`);
@@ -434,4 +459,98 @@ async function executeNode(node: FlowNode, inputs: Record<string, unknown>, job:
     default:
       throw new Error(`Unknown node type: ${node.type}`);
   }
+}
+
+// ─── Sprint 10 Builder stub ─────────────────────────────────────────────
+// Drives sub_jobs and the parent jobs.stats counter so the Builder UI can be
+// exercised end-to-end before real plugin wiring lands. Generator nodes emit
+// a placeholder sample-video URL so the Album/preview overlays render.
+const STUB_GENERATOR_TYPES = new Set(['generate_image', 'generate_video', 'gemini_prompt', 'gemini_prompt_kie', 'merge_video']);
+const STUB_PLACEHOLDER_VIDEO =
+  'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+const STUB_PLACEHOLDER_IMAGE =
+  'https://images.unsplash.com/photo-1519681393784-d120267933ba?w=800';
+
+async function runBuilderStub(job: Job): Promise<{ outputUrl: string }> {
+  const graph = job.flow_graph!;
+  const order = graph.executionOrder ?? graph.nodes.map((n) => n.id);
+  const total = order.length;
+  let done = 0;
+  let err = 0;
+  let wait = total;
+
+  logger.info({ jobId: job.id, total }, 'runBuilderStub: start');
+
+  for (const nodeId of order) {
+    const node = graph.nodes.find((n) => n.id === nodeId);
+    if (!node) continue;
+
+    // Honour pause/cancel before each step.
+    const { data: cur } = await supabase()
+      .from('jobs')
+      .select('status')
+      .eq('id', job.id)
+      .single();
+    while (cur && (cur as any).status === 'paused') {
+      await new Promise((r) => setTimeout(r, 1500));
+      const { data: again } = await supabase().from('jobs').select('status').eq('id', job.id).single();
+      if (!again || (again as any).status !== 'paused') break;
+    }
+    if (cur && (cur as any).status === 'cancelled') {
+      logger.info({ jobId: job.id }, 'runBuilderStub: cancelled');
+      throw new Error('cancelled by user');
+    }
+
+    const { data: subJob } = await supabase()
+      .from('sub_jobs')
+      .insert({
+        job_id: job.id,
+        node_id: nodeId,
+        node_type: node.type,
+        status: 'running',
+        input: node.data?.config ?? {},
+        started_at: new Date().toISOString(),
+      })
+      .select('id')
+      .single();
+
+    // Simulate work — short for non-generators, longer for generators.
+    const dur = STUB_GENERATOR_TYPES.has(node.type) ? 1500 : 250;
+    await new Promise((r) => setTimeout(r, dur));
+
+    const output = STUB_GENERATOR_TYPES.has(node.type)
+      ? buildStubOutput(node.type)
+      : { ok: true };
+
+    if (subJob) {
+      await supabase()
+        .from('sub_jobs')
+        .update({
+          status: 'completed',
+          output,
+          finished_at: new Date().toISOString(),
+        })
+        .eq('id', (subJob as any).id);
+    }
+
+    done += 1;
+    wait = Math.max(0, total - done - err);
+    await supabase()
+      .from('jobs')
+      .update({ stats: { done, wait, err } })
+      .eq('id', job.id);
+  }
+
+  logger.info({ jobId: job.id, done }, 'runBuilderStub: complete');
+  return { outputUrl: STUB_PLACEHOLDER_VIDEO };
+}
+
+function buildStubOutput(type: string): Record<string, unknown> {
+  if (type === 'generate_video' || type === 'merge_video') {
+    return { media: [{ url: STUB_PLACEHOLDER_VIDEO, kind: 'video' }] };
+  }
+  if (type === 'generate_image') {
+    return { media: [{ url: STUB_PLACEHOLDER_IMAGE, kind: 'image' }] };
+  }
+  return { text: 'Stub output — Sprint 10 builder execution pending.' };
 }

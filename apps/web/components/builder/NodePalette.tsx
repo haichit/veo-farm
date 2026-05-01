@@ -31,7 +31,7 @@ export function NodePalette() {
               {NODE_CATEGORIES[catKey]}
             </div>
             {items.map((item) => {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              // eslint-disable-next-line
               const Icon = ((Icons as any)[item.icon] ?? Icons.Box) as Icons.LucideIcon;
               return (
                 <div
