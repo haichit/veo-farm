@@ -11,6 +11,7 @@ import {
 } from '@/lib/builder/node-types';
 import { getNodeInputPorts, inputHandleId, outputHandleId } from '@/lib/builder/dynamic-ports';
 import { useFlowStore, type BuilderNodeData } from '@/lib/builder/flow-store';
+import { PreviewMedia } from '../preview/PreviewMedia';
 
 interface BaseNodeProps extends NodeProps {
   /** Body content rendered between header and ports overlay. */
@@ -211,7 +212,12 @@ export function BaseNode(props: BaseNodeProps) {
       </div>
 
       {/* Body */}
-      <div className="px-3 py-2.5">{children}</div>
+      <div className="px-3 py-2.5">
+        {children}
+        {(data as BuilderNodeData)?.previewMedia && (data as BuilderNodeData).previewMedia!.length > 0 && (
+          <PreviewMedia media={(data as BuilderNodeData).previewMedia!} />
+        )}
+      </div>
 
       {/* Loading ring overlay */}
       {status === 'running' && <LoadingRing nodeType={type as BuilderNodeType} color={def.color} />}
