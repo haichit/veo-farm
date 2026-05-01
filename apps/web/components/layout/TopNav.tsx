@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   LogOut,
   Settings,
+  Workflow,
 } from 'lucide-react';
 import { SettingsModal } from './SettingsModal';
 
@@ -24,6 +25,7 @@ export function TopNav({ email }: TopNavProps) {
   const tabs = [
     { href: '/', label: 'Dashboard', icon: LayoutDashboard, exact: true },
     { href: '/flows', label: 'Flows', icon: Layers3 },
+    { href: '/canvas', label: 'Canvas', icon: Workflow },
     { href: '/accounts', label: 'Accounts', icon: Key },
     { href: '/runs', label: 'Runs', icon: ListChecks },
   ];

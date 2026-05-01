@@ -89,3 +89,12 @@ export function outputHandleId(index: number): string {
 export function isDynamicPortNode(type: string): boolean {
   return DYNAMIC_PORT_NODES.has(type as BuilderNodeType);
 }
+
+/** Extract the numeric index from a handle id like "input-2" → 2. */
+export function parseHandleIndex(handle: string | null | undefined): number | null {
+  if (!handle) return null;
+  const m = /-(\d+)$/.exec(handle);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return Number.isFinite(n) ? n : null;
+}
