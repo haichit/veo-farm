@@ -67,7 +67,7 @@ export function AddAccountModal({
 
         <div className="space-y-3">
           <div>
-            <label className="text-xs text-muted-foreground">Provider</label>
+            <label className="text-xs font-semibold text-text-secondary tracking-wide block mb-1.5 uppercase">Provider</label>
             <Select value={provider} onValueChange={setProvider}>
               <SelectTrigger>
                 <SelectValue />
@@ -82,11 +82,11 @@ export function AddAccountModal({
             </Select>
           </div>
           <div>
-            <label className="text-xs text-muted-foreground">Label (vd: chatgpt-plus-1)</label>
+            <label className="text-xs font-semibold text-text-secondary tracking-wide block mb-1.5 uppercase">Label (vd: chatgpt-plus-1)</label>
             <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="optional" />
           </div>
           <div>
-            <label className="text-xs text-muted-foreground">Cookies JSON</label>
+            <label className="text-xs font-semibold text-text-secondary tracking-wide block mb-1.5 uppercase">Cookies JSON</label>
             <Textarea
               value={cookiesJson}
               onChange={(e) => setCookiesJson(e.target.value)}
@@ -94,14 +94,18 @@ export function AddAccountModal({
               className="font-mono text-xs min-h-[200px]"
             />
           </div>
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && (
+            <div className="text-sm text-error bg-error-bg border border-error/30 rounded-lg px-3 py-2">
+              ⚠ {error}
+            </div>
+          )}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             Huỷ
           </Button>
-          <Button onClick={submit} disabled={submitting || !cookiesJson}>
+          <Button variant="primary" onClick={submit} disabled={submitting || !cookiesJson}>
             {submitting ? 'Đang lưu...' : 'Lưu'}
           </Button>
         </DialogFooter>

@@ -28,7 +28,7 @@ export function RunButton({ flowId }: { flowId: string }) {
   }
 
   return (
-    <Button onClick={run} disabled={running} size="sm">
+    <Button onClick={run} disabled={running} variant="primary" size="sm">
       <Play className="h-4 w-4" /> {running ? 'Đang queue...' : 'Run'}
     </Button>
   );

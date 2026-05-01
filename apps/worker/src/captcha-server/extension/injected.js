@@ -2,7 +2,7 @@
 (async function () {
   const TAG = '[Veo-Farm-Ext/Injected]';
   const RECAPTCHA_SITE_KEY = '6LdsFiUsAAAAAIjVDZcuLhaHiDn5nnHVXVRQGeMV';
-  const DEFAULT_SERVER = 'http://127.0.0.1:3456';
+  const DEFAULT_SERVER = 'https://127.0.0.1:3456';
 
   const log = (...a) => console.log(TAG, ...a);
   const warn = (...a) => console.warn(TAG, '⚠️', ...a);
@@ -53,10 +53,16 @@
     }
 
     const socket = window.io(serverUrl, {
-      transports: ['websocket', 'polling'],
+      // Polling first — WebSocket to self-signed-cert localhost can fail in fresh
+      // profiles even with --ignore-certificate-errors. Polling uses HTTPS fetch
+      // which respects the flag and works reliably.
+      transports: ['polling', 'websocket'],
+      upgrade: true,
       reconnection: true,
       reconnectionDelay: 2000,
       reconnectionAttempts: Infinity,
+      rejectUnauthorized: false,
+      secure: true,
     });
 
     socket.on('connect', () => {

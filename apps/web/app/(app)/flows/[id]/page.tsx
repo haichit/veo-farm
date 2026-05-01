@@ -10,10 +10,12 @@ export default async function FlowEditorPage({ params }: { params: { id: string 
 
   return (
     <div className="h-screen flex flex-col">
-      <header className="flex items-center justify-between border-b px-4 h-12 shrink-0">
+      <header className="flex items-center justify-between border-b border-border bg-bg-secondary/60 backdrop-blur-xl px-4 h-12 shrink-0">
         <div>
-          <h1 className="font-semibold text-sm">{flow.name}</h1>
-          <p className="text-xs text-muted-foreground">{flow.description ?? 'Drag-drop workflow editor'}</p>
+          <h1 className="font-semibold text-sm text-text-primary">{flow.name}</h1>
+          <p className="text-[11px] text-text-muted">
+            {flow.description ?? 'Drag-drop workflow editor'}
+          </p>
         </div>
         <RunButton flowId={flow.id} />
       </header>

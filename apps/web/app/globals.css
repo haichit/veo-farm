@@ -4,36 +4,140 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --ring: 215 20.2% 65.1%;
-    --radius: 0.5rem;
-  }
+    /* shadcn HSL legacy (kept for back-compat) */
+    --background: 240 24% 6%;
+    --foreground: 240 20% 95%;
+    --muted: 240 15% 12%;
+    --muted-foreground: 240 8% 60%;
+    --input: 240 15% 10%;
+    --primary: 240 20% 95%;
+    --primary-foreground: 240 24% 6%;
+    --accent-foreground: 240 20% 95%;
+    --ring: 258 90% 66%;
+    --radius: 16px;
 
-  .dark {
-    --background: 222.2 47.4% 11.2%;
-    --foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --ring: 217.2 32.6% 17.5%;
+    /* Glass-morphism tokens (SPEC §19.1) */
+    --bg-primary: #0a0a12;
+    --bg-secondary: #111120;
+    --bg-card: #161628;
+    --bg-card-hover: #1c1c38;
+    --bg-input: #12121f;
+    --glass-bg: rgba(20, 20, 40, 0.85);
+
+    --border: rgba(255, 255, 255, 0.06);
+    --glass-border: rgba(138, 92, 246, 0.15);
+    --border-focus: rgba(138, 92, 246, 0.5);
+
+    --accent: #8a5cf6;
+    --accent-hover: #7c4dff;
+    --accent-glow: rgba(138, 92, 246, 0.25);
+    --secondary: #ec4899;
+
+    --success: #34d399;
+    --success-bg: rgba(52, 211, 153, 0.1);
+    --error: #ef4444;
+    --error-bg: rgba(239, 68, 68, 0.1);
+    --warning: #fbbf24;
+    --warning-bg: rgba(251, 191, 36, 0.1);
+    --info: #60a5fa;
+
+    --text-primary: #f0f0f5;
+    --text-secondary: #a0a0b8;
+    --text-muted: #5a5a75;
+
+    --radius-sm: 10px;
+    --radius-xs: 6px;
+    --transition: 0.2s ease;
+    --font: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   }
 }
 
 @layer base {
-  * { @apply border-border; }
-  body { @apply bg-background text-foreground; }
+  * {
+    border-color: var(--border);
+  }
+  html,
+  body {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font);
+  }
+  body {
+    @apply antialiased;
+    min-height: 100vh;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-orb-float,
+    .animate-card-appear,
+    .animate-logo-pulse,
+    .animate-spin-slow {
+      animation: none !important;
+    }
+  }
+}
+
+/* React Flow theme override (SPEC §19.7) */
+.react-flow {
+  background: var(--bg-primary);
+}
+
+.react-flow__background {
+  background-color: var(--bg-primary);
+}
+
+.react-flow__node {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.react-flow__node.selected {
+  border-color: var(--accent);
+  box-shadow:
+    0 4px 20px rgba(0, 0, 0, 0.3),
+    0 0 0 2px var(--accent-glow);
+}
+
+.react-flow__handle {
+  background: var(--accent);
+  border: 2px solid var(--bg-card);
+  width: 10px;
+  height: 10px;
+}
+
+.react-flow__edge-path {
+  stroke: rgba(138, 92, 246, 0.5);
+  stroke-width: 2;
+}
+
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge.animated .react-flow__edge-path {
+  stroke: var(--accent);
+}
+
+.react-flow__minimap {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.react-flow__controls {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.react-flow__controls button {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+}
+
+.react-flow__controls button:hover {
+  background: var(--accent-glow);
+  color: var(--accent);
 }

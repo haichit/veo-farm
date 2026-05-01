@@ -1,8 +1,12 @@
-// Captcha server — Express HTTP + Socket.IO for browser-extension communication.
+// Captcha server — HTTPS + Socket.IO for browser-extension communication.
+// Self-signed cert generated at boot — required because labs.google is HTTPS
+// and browsers block mixed-content WebSocket to plain HTTP localhost.
 // Reference: SPEC_REPLICA_BACKEND.md section 18.11.
 
-import http from 'node:http';
+import https from 'node:https';
 import crypto from 'node:crypto';
+// @ts-ignore — selfsigned has loose types
+import selfsigned from 'selfsigned';
 import { Server as SocketIOServer, type Socket } from 'socket.io';
 
 const PORT = parseInt(process.env.CAPTCHA_PORT ?? '3456', 10);
@@ -48,11 +52,40 @@ function requestFromClient(client: Client, action: string, reqId: string): Promi
   });
 }
 
-const httpServer = http.createServer(async (req, res) => {
+// Generate a self-signed certificate at boot. Valid for 365 days, covers
+// localhost + 127.0.0.1 via subjectAltName so Brave/Chrome won't reject WS.
+const tlsAttrs = [{ name: 'commonName', value: 'localhost' }];
+const tlsOpts: any = {
+  algorithm: 'sha256',
+  days: 365,
+  keySize: 2048,
+  extensions: [
+    {
+      name: 'subjectAltName',
+      altNames: [
+        { type: 7, ip: '127.0.0.1' }, // 7 = IP address
+        { type: 2, value: 'localhost' }, // 2 = DNS name
+      ],
+    },
+  ],
+};
+const tlsPems = (selfsigned as any).generate(tlsAttrs, tlsOpts) as {
+  private: string;
+  cert: string;
+};
+
+const httpsServer = https.createServer(
+  {
+    key: tlsPems.private,
+    cert: tlsPems.cert,
+    minVersion: 'TLSv1.2',
+  },
+  async (req, res) => {
   const url = new URL(req.url ?? '/', `http://localhost:${PORT}`);
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  res.setHeader('Access-Control-Allow-Private-Network', 'true');
   res.setHeader('Content-Type', 'application/json');
 
   if (req.method === 'OPTIONS') {
@@ -125,7 +158,7 @@ const httpServer = http.createServer(async (req, res) => {
   res.end(JSON.stringify({ error: 'Not found' }));
 });
 
-const io = new SocketIOServer(httpServer, { cors: { origin: '*' } });
+const io = new SocketIOServer(httpsServer, { cors: { origin: '*' } });
 
 io.on('connection', (socket) => {
   connectedClients.set(socket.id, { socket, browserType: 'unknown' });
@@ -169,15 +202,18 @@ io.on('connection', (socket) => {
   });
 });
 
-httpServer.listen(PORT, () => {
+httpsServer.listen(PORT, () => {
   const lines = [
     '╔══════════════════════════════════════════════════╗',
-    '║  🔓  Veo Farm Captcha Server                     ║',
-    `║  HTTP:  http://localhost:${PORT}                       ║`,
+    '║  🔓  Veo Farm Captcha Server (HTTPS)             ║',
+    `║  HTTPS: https://localhost:${PORT}                      ║`,
     '║  GET   /captcha?action=IMAGE_GENERATION          ║',
     '║  GET   /health                                   ║',
     '║  POST  /force-refresh                            ║',
     `║  Mode:  ${CAPTCHA_MODE.padEnd(40)}║`,
+    '║  Cert:  self-signed (sha256, 365d, localhost+IP) ║',
+    '║  Tip:   visit https://127.0.0.1:3456/health once ║',
+    '║         in Brave to accept the cert.             ║',
     '╚══════════════════════════════════════════════════╝',
   ];
   console.log(lines.join('\n'));

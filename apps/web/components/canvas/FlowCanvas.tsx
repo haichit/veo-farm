@@ -76,7 +76,15 @@ export default function FlowCanvas({ flowId, initialNodes, initialEdges }: Props
 
   return (
     <div className="relative h-[calc(100vh-3rem)]">
-      <div className="absolute top-2 right-2 z-10 text-xs px-2 py-1 rounded bg-background border">
+      <div
+        className={`absolute top-3 right-3 z-10 text-[11px] font-medium px-2.5 py-1 rounded-full border backdrop-blur-md transition-colors ${
+          saveStatus === 'saving'
+            ? 'bg-info/10 border-info/30 text-info'
+            : saveStatus === 'saved'
+              ? 'bg-success-bg border-success/30 text-success'
+              : 'bg-error-bg border-error/30 text-error'
+        }`}
+      >
         {saveStatus === 'saving' && '💾 Đang lưu...'}
         {saveStatus === 'saved' && '✓ Đã lưu'}
         {saveStatus === 'error' && '❌ Lỗi lưu'}
@@ -94,7 +102,12 @@ export default function FlowCanvas({ flowId, initialNodes, initialEdges }: Props
         >
           <Background />
           <Controls />
-          <MiniMap />
+          <MiniMap
+            maskColor="rgba(10, 10, 18, 0.7)"
+            nodeColor="#1c1c38"
+            nodeStrokeColor="rgba(138, 92, 246, 0.4)"
+            style={{ background: '#111120', border: '1px solid rgba(255,255,255,0.06)' }}
+          />
         </ReactFlow>
       </ReactFlowProvider>
       </FlowOutputsProvider>

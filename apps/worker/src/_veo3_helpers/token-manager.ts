@@ -11,7 +11,7 @@ import puppeteerExtra from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import type { Browser, Page, CDPSession } from 'puppeteer-core';
 import { CaptchaBridge } from './captcha-bridge.js';
-import { LABS_BASE } from './constants.js';
+import { LABS_BASE, RECAPTCHA_SITE_KEY } from './constants.js';
 
 puppeteerExtra.use(StealthPlugin());
 
@@ -59,20 +59,56 @@ export class TokenManager {
       '--disable-features=IsolateOrigins,site-per-process',
       `--load-extension=${extPath}`,
       `--disable-extensions-except=${extPath}`,
+      // Trust captcha-server's self-signed cert so extension can WS to https://127.0.0.1:3456.
+      '--ignore-certificate-errors',
+      '--allow-insecure-localhost',
     ];
 
     const launchOpts: any = {
       headless: opts.headless ?? false,
       args,
       defaultViewport: { width: 1280, height: 800 },
+      ignoreHTTPSErrors: true,
+      acceptInsecureCerts: true,
     };
     if (opts.chromeExecutablePath) launchOpts.executablePath = opts.chromeExecutablePath;
     if (opts.userDataDir) launchOpts.userDataDir = opts.userDataDir;
 
-    this._browser = (await puppeteerExtra.launch(launchOpts)) as Browser;
+    // Kill any stale browser processes still holding our userDataDir lock from a
+    // crashed previous run. browser.close() can leave subprocesses alive on macOS.
+    if (opts.userDataDir) {
+      await killStaleProfileProcesses(opts.userDataDir);
+    }
+
+    // Retry launch with backoff in case the OS hasn't fully released the lock yet.
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        this._browser = (await puppeteerExtra.launch(launchOpts)) as Browser;
+        lastErr = null;
+        break;
+      } catch (err: any) {
+        lastErr = err;
+        const msg = String(err?.message ?? err);
+        if (!msg.includes('already running')) throw err;
+        if (opts.userDataDir) await killStaleProfileProcesses(opts.userDataDir);
+        await sleep(3000);
+      }
+    }
+    if (!this._browser) throw lastErr ?? new Error('TokenManager.launch: browser is null');
 
     const pages = await this._browser.pages();
     this._page = pages.length > 0 ? pages[0] : await this._browser.newPage();
+    // Close any other tabs left over from previous (possibly crashed) sessions.
+    for (const p of pages) {
+      if (p !== this._page) {
+        try {
+          await p.close();
+        } catch {
+          /* ignore */
+        }
+      }
+    }
     this._cdp = await (this._page as any).target().createCDPSession();
 
     // Inject cookies if provided (works with launchPersistentContext too).
@@ -86,8 +122,25 @@ export class TokenManager {
 
     this._attachTokenInterceptor();
 
+    // Forward browser-page console to stdout so extension logs are visible.
+    this._page.on('console', (msg) => {
+      const text = msg.text();
+      if (
+        text.includes('Veo-Farm') ||
+        text.includes('Captcha') ||
+        text.includes('socket.io')
+      ) {
+        // eslint-disable-next-line no-console
+        console.log(`[browser:${msg.type()}] ${text}`);
+      }
+    });
+    this._page.on('pageerror', (e: unknown) => {
+      // eslint-disable-next-line no-console
+      console.error('[browser:pageerror]', (e as Error)?.message ?? e);
+    });
+
     await this._page.goto(`${LABS_BASE}/fx/vi/tools/flow`, {
-      waitUntil: 'networkidle2',
+      waitUntil: 'domcontentloaded',
       timeout: 90_000,
     });
 
@@ -151,7 +204,66 @@ export class TokenManager {
     throw new Error('Failed to extract Bearer token from labs.google requests');
   }
 
+  /**
+   * Resolve a reCAPTCHA Enterprise token. Prefers in-page grecaptcha.execute (no captcha-server
+   * needed) and falls back to the local captcha-server bridge.
+   */
   async getRecaptchaToken(action: string): Promise<string> {
+    // In-page execute (preferred — no socket.io / cert hassles).
+    // Outer retry wraps both waitForFunction + evaluate so a detached frame /
+    // destroyed context anywhere in the sequence triggers a fresh attempt.
+    if (this._page) {
+      const isTransient = (msg: string) =>
+        msg.includes('Execution context was destroyed') ||
+        msg.includes('Target closed') ||
+        msg.includes('Protocol error') ||
+        msg.includes('detached Frame') ||
+        msg.includes('Frame');
+
+      for (let attempt = 0; attempt < 6; attempt++) {
+        if (attempt > 0) await sleep(2000);
+        try {
+          await this._page.waitForFunction(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            () => !!(globalThis as any).grecaptcha?.enterprise?.execute,
+            { timeout: 30_000, polling: 500 },
+          );
+          const result = await this._page.evaluate(
+            async (siteKey: string, act: string) => {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const ent = (globalThis as any).grecaptcha?.enterprise;
+              if (!ent?.execute) return { ok: false, reason: 'no-grecaptcha' };
+              if (ent.ready) {
+                await new Promise<void>((resolve) => ent.ready(() => resolve()));
+              }
+              try {
+                const tok = await ent.execute(siteKey, { action: act });
+                return { ok: true, token: tok };
+              } catch (e: any) {
+                return { ok: false, reason: 'execute-threw', err: String(e?.message ?? e) };
+              }
+            },
+            RECAPTCHA_SITE_KEY,
+            action,
+          );
+          if (result?.ok && typeof result.token === 'string' && result.token.length > 0) {
+            return result.token;
+          }
+          console.warn(
+            `[TokenManager] grecaptcha attempt ${attempt + 1}/6: no token`,
+            (result as any)?.reason,
+            (result as any)?.err ?? '',
+          );
+        } catch (e: any) {
+          const msg = String(e?.message ?? e);
+          console.warn(
+            `[TokenManager] grecaptcha attempt ${attempt + 1}/6 threw:`,
+            msg,
+          );
+          if (!isTransient(msg)) break;
+        }
+      }
+    }
     return this._captchaBridge.getToken(action);
   }
 
@@ -178,7 +290,22 @@ export class TokenManager {
     this._browser = null;
     this._page = null;
     this._cdp = null;
+    // Wait for OS to release the userDataDir lock (Brave subprocesses can linger
+    // for a couple seconds after CDP says the browser is closed).
+    await sleep(2000);
   }
+}
+
+async function killStaleProfileProcesses(userDataDir: string): Promise<void> {
+  const { exec } = await import('node:child_process');
+  await new Promise<void>((resolve) => {
+    // pgrep matches command line; kill -9 any process whose argv contains our profile dir.
+    exec(
+      `pgrep -f ${JSON.stringify(userDataDir)} | xargs kill -9 2>/dev/null; true`,
+      () => resolve(),
+    );
+  });
+  await sleep(500);
 }
 
 function sleep(ms: number): Promise<void> {

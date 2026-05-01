@@ -6,6 +6,8 @@
   "permissions": ["storage", "activeTab", "scripting", "tabs"],
   "host_permissions": [
     "https://labs.google/*",
+    "https://localhost:3456/*",
+    "https://127.0.0.1:3456/*",
     "http://localhost:3456/*",
     "http://127.0.0.1:3456/*"
   ],
