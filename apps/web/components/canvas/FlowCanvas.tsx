@@ -116,6 +116,7 @@ export default function FlowCanvas({ flowId, initialNodes, initialEdges }: Props
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           nodeTypes={types}
+          deleteKeyCode={['Backspace', 'Delete']}
           fitView
         >
           <Background />

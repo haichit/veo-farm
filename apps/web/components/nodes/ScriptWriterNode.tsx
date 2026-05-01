@@ -6,7 +6,7 @@ import { ScriptPreview } from './OutputPreview';
 
 export function ScriptWriterNode({ id, data, selected }: NodeProps) {
   return (
-    <BaseNode selected={selected} icon="📝" title="Script Writer" width={320}>
+    <BaseNode id={id} selected={selected} icon="📝" title="Script Writer" width={320}>
       <ProviderConfig
         id={id}
         provider={(data?.provider as string) ?? 'chatgpt'}

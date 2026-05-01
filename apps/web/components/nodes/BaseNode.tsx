@@ -1,9 +1,11 @@
 'use client';
-import { Handle, Position } from '@xyflow/react';
+import { Handle, Position, useReactFlow } from '@xyflow/react';
+import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ReactNode } from 'react';
 
 interface Props {
+  id?: string;
   selected?: boolean;
   icon: ReactNode;
   title: string;
@@ -22,6 +24,7 @@ const STATUS_CLASSES = {
 } as const;
 
 export function BaseNode({
+  id,
   selected,
   icon,
   title,
@@ -31,11 +34,18 @@ export function BaseNode({
   outputs = true,
   width = 320,
 }: Props) {
+  const rf = useReactFlow();
+  const onDelete = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!id) return;
+    rf.setNodes((ns) => ns.filter((n) => n.id !== id));
+    rf.setEdges((es) => es.filter((e) => e.source !== id && e.target !== id));
+  };
   return (
     <div
       style={{ width }}
       className={cn(
-        'bg-bg-card rounded-2xl border-2 transition-all',
+        'group bg-bg-card rounded-2xl border-2 transition-all',
         selected ? 'border-accent shadow-accent-glow' : STATUS_CLASSES[status],
       )}
     >
@@ -60,6 +70,18 @@ export function BaseNode({
         )}
         {status === 'error' && (
           <span className="w-2 h-2 rounded-full bg-error" aria-label="Error" />
+        )}
+        {id && (
+          <button
+            type="button"
+            onClick={onDelete}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="nodrag w-6 h-6 rounded-md flex items-center justify-center text-text-muted opacity-0 group-hover:opacity-100 hover:text-error hover:bg-error-bg transition-all"
+            aria-label="Xoá node"
+            title="Xoá node"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         )}
       </div>
 

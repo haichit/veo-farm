@@ -3,10 +3,10 @@ import { type NodeProps } from '@xyflow/react';
 import { BaseNode } from './BaseNode';
 import { useJobStatus } from '@/lib/hooks/useFlowOutputs';
 
-export function DownloadNode({ selected }: NodeProps) {
+export function DownloadNode({ id, selected }: NodeProps) {
   const job = useJobStatus();
   return (
-    <BaseNode selected={selected} icon="⬇️" title="Download" outputs={false} width={300}>
+    <BaseNode id={id} selected={selected} icon="⬇️" title="Download" outputs={false} width={300}>
       <div className="text-muted-foreground">Final MP4 output</div>
       {job?.output_url ? (
         <a

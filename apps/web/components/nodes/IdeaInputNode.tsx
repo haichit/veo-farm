@@ -7,7 +7,7 @@ export function IdeaInputNode({ id, data, selected }: NodeProps) {
   const rf = useReactFlow();
   const value = (data?.value as string) ?? '';
   return (
-    <BaseNode selected={selected} icon="💡" title="Idea" inputs={false}>
+    <BaseNode id={id} selected={selected} icon="💡" title="Idea" inputs={false}>
       <Textarea
         placeholder="Vd: Mèo Mochi đi Đà Lạt 1 ngày..."
         value={value}

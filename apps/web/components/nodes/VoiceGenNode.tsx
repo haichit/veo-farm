@@ -6,7 +6,7 @@ import { VoicesPreview } from './OutputPreview';
 
 export function VoiceGenNode({ id, data, selected }: NodeProps) {
   return (
-    <BaseNode selected={selected} icon="🎤" title="Voice Gen" width={320}>
+    <BaseNode id={id} selected={selected} icon="🎤" title="Voice Gen" width={320}>
       <ProviderConfig
         id={id}
         provider={(data?.provider as string) ?? 'veo_native'}

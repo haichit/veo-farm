@@ -18,7 +18,7 @@ export function ConcatNode({ id, data, selected }: NodeProps) {
     );
 
   return (
-    <BaseNode selected={selected} icon="🎞️" title="Concat + Audio" width={340}>
+    <BaseNode id={id} selected={selected} icon="🎞️" title="Concat + Audio" width={340}>
       <div>
         <label className="text-muted-foreground">Transition</label>
         <Select value={transition} onValueChange={(v) => update({ transition: v })}>

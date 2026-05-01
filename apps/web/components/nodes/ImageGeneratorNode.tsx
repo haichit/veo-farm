@@ -6,7 +6,7 @@ import { ImagesPreview } from './OutputPreview';
 
 export function ImageGeneratorNode({ id, data, selected }: NodeProps) {
   return (
-    <BaseNode selected={selected} icon="🖼️" title="Image Generator" width={340}>
+    <BaseNode id={id} selected={selected} icon="🖼️" title="Image Generator" width={340}>
       <ProviderConfig
         id={id}
         provider={(data?.provider as string) ?? 'flux'}

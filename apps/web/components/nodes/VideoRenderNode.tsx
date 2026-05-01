@@ -6,7 +6,7 @@ import { VideosPreview } from './OutputPreview';
 
 export function VideoRenderNode({ id, data, selected }: NodeProps) {
   return (
-    <BaseNode selected={selected} icon="🎬" title="Video Render" width={340}>
+    <BaseNode id={id} selected={selected} icon="🎬" title="Video Render" width={340}>
       <ProviderConfig
         id={id}
         provider={(data?.provider as string) ?? 'veo3'}
