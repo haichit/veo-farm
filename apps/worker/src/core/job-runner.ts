@@ -19,6 +19,7 @@ import { uploadBuffer } from './storage.js';
 import { createSubJob, completeSubJob, failSubJob } from './sub-jobs.js';
 import { getPlugin } from '../plugins/registry.js';
 import { runConcat } from '../nodes/concat.js';
+import { extractLastFrame } from './last-frame.js';
 
 interface Job {
   id: string;
@@ -294,10 +295,52 @@ async function executeNode(node: FlowNode, inputs: Record<string, unknown>, job:
       const script = inputs.script as ScriptOutput;
       const images = (inputs.images as ImageOutput[] | undefined) ?? [];
       const concurrency = parseConcurrency(node.data?.concurrency);
+      const chainFrames = node.data?.chainFrames === true;
       if (!script?.scenes) throw new Error('videoRender: missing script input');
 
-      const limit = pLimit(Math.max(1, concurrency));
       const results: VideoOutput[] = [];
+
+      if (chainFrames) {
+        // Serial loop: each scene's last frame becomes the next scene's startImage.
+        // Concurrency is forced to 1 (chaining requires order).
+        let prevVideoUrl: string | null = null;
+        for (let i = 0; i < script.scenes.length; i++) {
+          const scene = script.scenes[i];
+          const subId = await createSubJob(job.id, node.id, 'video', providerId, { sceneIdx: i });
+          try {
+            let startImageUrl: string | undefined;
+            if (prevVideoUrl) {
+              logger.info({ sceneIdx: i, prevVideoUrl }, 'chainFrames: extracting last frame');
+              const frame = await extractLastFrame(prevVideoUrl);
+              const frameUrl = await uploadBuffer(job.user_id, job.id, frame, 'jpg');
+              startImageUrl = frameUrl;
+            }
+            const { result, accountId } = await withProvider<VideoOutput>('video', providerId, job, 5, (plugin, ctx) =>
+              plugin.generateVideo(
+                {
+                  prompt: scene.video_prompt,
+                  refImageUrl: i === 0 ? images[i]?.imageUrl : undefined,
+                  startImageUrl,
+                  voiceScript: scene.voice_script,
+                  durationSec: scene.duration_sec,
+                  aspectRatio: '9:16',
+                },
+                ctx,
+              ),
+            );
+            results[i] = result;
+            prevVideoUrl = result.videoUrl;
+            await completeSubJob(subId, result, accountId);
+          } catch (err: any) {
+            await failSubJob(subId, String(err?.message ?? err));
+            throw err;
+          }
+        }
+        return results;
+      }
+
+      // Default: parallel via pLimit (each scene independent, no frame chain).
+      const limit = pLimit(Math.max(1, concurrency));
       await Promise.all(
         script.scenes.map((scene, i) =>
           limit(async () => {

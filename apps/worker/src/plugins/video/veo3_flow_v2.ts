@@ -90,6 +90,14 @@ export const Veo3FlowV2Plugin: VideoProvider = {
         refMediaId = upload.mediaId;
       }
 
+      let startImageMediaId: string | undefined;
+      if (input.startImageUrl) {
+        logger.info('veo3_flow_v2: uploading start frame (chain-frames)');
+        const buf = await downloadFromUrl(input.startImageUrl);
+        const upload = await client.uploadImage(buf, 'image/jpeg');
+        startImageMediaId = upload.mediaId;
+      }
+
       // Compose prompt — append voiceover hint if provided.
       let prompt = input.prompt;
       if (input.voiceScript) {
@@ -98,12 +106,17 @@ export const Veo3FlowV2Plugin: VideoProvider = {
 
       const aspectRatio = (input.aspectRatio === '9:16' ? '9:16' : '16:9') as '9:16' | '16:9';
 
-      logger.info('veo3_flow_v2: starting generation', { aspectRatio, hasRef: !!refMediaId });
+      logger.info('veo3_flow_v2: starting generation', {
+        aspectRatio,
+        hasRef: !!refMediaId,
+        hasStart: !!startImageMediaId,
+      });
       const startResult = await client.generateVideo(prompt, {
         aspectRatio,
         count: 1,
         model: 'veo_3_1_fast',
         referenceImages: refMediaId ? [refMediaId] : undefined,
+        startImageId: startImageMediaId,
       });
 
       const media = (startResult.media ?? []).map((m) => ({

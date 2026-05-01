@@ -112,6 +112,9 @@ export interface ImageProvider {
 export interface VideoInput {
   prompt: string;
   refImageUrl?: string;
+  /** URL of an image to use as the FIRST FRAME of the generated video (i2v mode).
+   * Used by chain-frames mode to wire scene N+1 to the last frame of scene N. */
+  startImageUrl?: string;
   voiceScript?: string;
   durationSec: number;
   aspectRatio: AspectRatio;
