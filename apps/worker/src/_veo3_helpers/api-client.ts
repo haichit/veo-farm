@@ -196,7 +196,7 @@ export class ApiClient extends EventEmitter {
     workflowId: string,
     opts: { timeoutMs?: number } = {},
   ): Promise<string> {
-    const timeout = opts.timeoutMs ?? 60_000;
+    const timeout = opts.timeoutMs ?? 90_000;
     const page = (this.tokenManager as any)._page;
     const cdp = (this.tokenManager as any)._cdp;
     if (!page || !cdp) throw new Error('getVideoUrl: no browser page/CDP available');
@@ -219,10 +219,44 @@ export class ApiClient extends EventEmitter {
 
     try {
       const editorUrl = `${LABS_BASE}/fx/vi/tools/flow/project/${projectId}/edit/${workflowId}`;
-      await page.goto(editorUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-      const start = Date.now();
-      while (!captured && Date.now() - start < timeout) {
-        await sleep(500);
+
+      // Up to 3 attempts: navigate (or reload) and wait for the video request.
+      // Veo sometimes serves the editor page before the new clip's <video> element
+      // has been mounted, so a reload after ~30s is what kicks the fetch.
+      for (let attempt = 0; attempt < 3 && !captured; attempt++) {
+        if (attempt === 0) {
+          await page.goto(editorUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+        } else {
+          await page.reload({ waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => {});
+        }
+        const perAttempt = Math.ceil(timeout / 3);
+        const start = Date.now();
+        while (!captured && Date.now() - start < perAttempt) {
+          await sleep(500);
+        }
+      }
+
+      // Fallback: read <video src> from DOM (browser may have used cached request
+      // from earlier scenes — handler doesn't see cached URLs even with cache disabled).
+      if (!captured) {
+        try {
+          const domSrc = await page.evaluate((name: string) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const doc: any = (globalThis as any).document;
+            if (!doc) return null;
+            const vids: any[] = Array.from(doc.querySelectorAll('video'));
+            for (const v of vids) {
+              const src: string = v.currentSrc || v.src || '';
+              if (src && src.includes('flow-content.google/video/') && src.includes(name)) {
+                return src;
+              }
+            }
+            return null;
+          }, mediaName);
+          if (typeof domSrc === 'string' && domSrc.length > 0) captured = domSrc;
+        } catch {
+          /* ignore */
+        }
       }
     } finally {
       cdp.off('Network.responseReceived', handler);

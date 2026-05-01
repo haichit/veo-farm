@@ -231,7 +231,7 @@ async function executeNode(node: FlowNode, inputs: Record<string, unknown>, job:
           limit(async () => {
             const subId = await createSubJob(job.id, node.id, 'video', providerId, { sceneIdx: i });
             try {
-              const { result, accountId } = await withProvider<VideoOutput>('video', providerId, job, 60, (plugin, ctx) =>
+              const { result, accountId } = await withProvider<VideoOutput>('video', providerId, job, 5, (plugin, ctx) =>
                 plugin.generateVideo(
                   {
                     prompt: scene.video_prompt,

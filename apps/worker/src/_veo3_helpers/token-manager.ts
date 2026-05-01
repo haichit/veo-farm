@@ -210,62 +210,58 @@ export class TokenManager {
    */
   async getRecaptchaToken(action: string): Promise<string> {
     // In-page execute (preferred — no socket.io / cert hassles).
+    // Outer retry wraps both waitForFunction + evaluate so a detached frame /
+    // destroyed context anywhere in the sequence triggers a fresh attempt.
     if (this._page) {
-      try {
-        // 1) Wait until grecaptcha SDK is loaded. waitForFunction survives
-        //    navigation/context destruction (auto-rebinds to new frame).
-        await this._page.waitForFunction(
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          () => !!(globalThis as any).grecaptcha?.enterprise?.execute,
-          { timeout: 60_000, polling: 500 },
-        );
+      const isTransient = (msg: string) =>
+        msg.includes('Execution context was destroyed') ||
+        msg.includes('Target closed') ||
+        msg.includes('Protocol error') ||
+        msg.includes('detached Frame') ||
+        msg.includes('Frame');
 
-        // 2) Execute grecaptcha. Retry on transient "context destroyed" /
-        //    "Target closed" errors that can happen during Flow SPA route changes.
-        for (let attempt = 0; attempt < 5; attempt++) {
-          if (attempt > 0) await sleep(2000);
-          try {
-            const result = await this._page.evaluate(
-              async (siteKey: string, act: string) => {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const ent = (globalThis as any).grecaptcha?.enterprise;
-                if (!ent?.execute) return { ok: false, reason: 'no-grecaptcha' };
-                if (ent.ready) {
-                  await new Promise<void>((resolve) => ent.ready(() => resolve()));
-                }
-                try {
-                  const tok = await ent.execute(siteKey, { action: act });
-                  return { ok: true, token: tok };
-                } catch (e: any) {
-                  return { ok: false, reason: 'execute-threw', err: String(e?.message ?? e) };
-                }
-              },
-              RECAPTCHA_SITE_KEY,
-              action,
-            );
-            if (result?.ok && typeof result.token === 'string' && result.token.length > 0) {
-              return result.token;
-            }
-            console.warn(
-              `[TokenManager] grecaptcha returned no token (attempt ${attempt + 1}/5):`,
-              (result as any)?.reason,
-              (result as any)?.err ?? '',
-            );
-          } catch (e: any) {
-            const msg = String(e?.message ?? e);
-            console.warn(
-              `[TokenManager] in-page evaluate threw (attempt ${attempt + 1}/5):`,
-              msg,
-            );
-            const transient =
-              msg.includes('Execution context was destroyed') ||
-              msg.includes('Target closed') ||
-              msg.includes('Protocol error');
-            if (!transient) break;
+      for (let attempt = 0; attempt < 6; attempt++) {
+        if (attempt > 0) await sleep(2000);
+        try {
+          await this._page.waitForFunction(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            () => !!(globalThis as any).grecaptcha?.enterprise?.execute,
+            { timeout: 30_000, polling: 500 },
+          );
+          const result = await this._page.evaluate(
+            async (siteKey: string, act: string) => {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const ent = (globalThis as any).grecaptcha?.enterprise;
+              if (!ent?.execute) return { ok: false, reason: 'no-grecaptcha' };
+              if (ent.ready) {
+                await new Promise<void>((resolve) => ent.ready(() => resolve()));
+              }
+              try {
+                const tok = await ent.execute(siteKey, { action: act });
+                return { ok: true, token: tok };
+              } catch (e: any) {
+                return { ok: false, reason: 'execute-threw', err: String(e?.message ?? e) };
+              }
+            },
+            RECAPTCHA_SITE_KEY,
+            action,
+          );
+          if (result?.ok && typeof result.token === 'string' && result.token.length > 0) {
+            return result.token;
           }
+          console.warn(
+            `[TokenManager] grecaptcha attempt ${attempt + 1}/6: no token`,
+            (result as any)?.reason,
+            (result as any)?.err ?? '',
+          );
+        } catch (e: any) {
+          const msg = String(e?.message ?? e);
+          console.warn(
+            `[TokenManager] grecaptcha attempt ${attempt + 1}/6 threw:`,
+            msg,
+          );
+          if (!isTransient(msg)) break;
         }
-      } catch (e: any) {
-        console.warn('[TokenManager] waitForFunction failed:', e?.message ?? e);
       }
     }
     return this._captchaBridge.getToken(action);
