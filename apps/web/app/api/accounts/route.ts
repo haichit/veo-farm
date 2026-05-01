@@ -45,6 +45,22 @@ export async function POST(req: Request) {
   const { provider_id, label, cookies, meta } = parsed.data;
   const cookies_encrypted = encrypt(JSON.stringify(cookies));
 
+  // Find earliest expiration across all cookies that have one (some are session-only).
+  // Stored as ISO string in meta so UI can warn before login breaks.
+  const expirations = cookies
+    .map((c: any) => {
+      const v = c.expires ?? c.expirationDate;
+      if (typeof v !== 'number') return null;
+      const ms = v < 1e12 ? v * 1000 : v; // seconds vs ms
+      return ms;
+    })
+    .filter((n): n is number => typeof n === 'number' && n > Date.now());
+  const minExpires = expirations.length > 0 ? Math.min(...expirations) : null;
+  const enrichedMeta = {
+    ...(meta ?? {}),
+    ...(minExpires ? { cookies_expire_at: new Date(minExpires).toISOString() } : {}),
+  };
+
   const { data, error } = await sb
     .from('accounts')
     .insert({
@@ -52,7 +68,7 @@ export async function POST(req: Request) {
       provider_id,
       label,
       cookies_encrypted,
-      meta: meta ?? {},
+      meta: enrichedMeta,
       status: 'idle',
     })
     .select('id, provider_id, label, status, created_at')

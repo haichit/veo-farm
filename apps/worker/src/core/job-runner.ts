@@ -25,10 +25,51 @@ interface Job {
   flow_id: string;
   user_id: string;
   input: { idea?: string } | null;
+  parent_job_id?: string | null;
+  retry_from_node?: string | null;
+}
+
+/**
+ * Build a cache of completed sub-job outputs from a parent job, so a retry can
+ * skip the work already done. Map: nodeId -> output (single) or array (per scene).
+ */
+async function buildParentOutputCache(
+  parentJobId: string,
+): Promise<Map<string, unknown>> {
+  const cache = new Map<string, unknown>();
+  const { data, error } = await supabase()
+    .from('sub_jobs')
+    .select('node_id, node_type, input, output, status')
+    .eq('job_id', parentJobId)
+    .eq('status', 'completed');
+  if (error || !data) return cache;
+
+  // Group by node_id. Per-scene plugins (image/video/voice) produce arrays
+  // indexed by sceneIdx; single-output plugins (script/concat) produce one value.
+  const byNode = new Map<string, typeof data>();
+  for (const sj of data) {
+    if (!byNode.has(sj.node_id)) byNode.set(sj.node_id, []);
+    byNode.get(sj.node_id)!.push(sj);
+  }
+  for (const [nodeId, subs] of byNode) {
+    const sceneIndexed = subs.every((s) => s.input?.sceneIdx !== undefined);
+    if (sceneIndexed) {
+      const arr: unknown[] = [];
+      for (const s of subs) arr[s.input.sceneIdx] = s.output;
+      cache.set(nodeId, arr);
+    } else {
+      // Take latest single output.
+      cache.set(nodeId, subs[subs.length - 1].output);
+    }
+  }
+  return cache;
 }
 
 export async function runJob(job: Job): Promise<{ outputUrl: string }> {
-  logger.info({ jobId: job.id }, 'runJob start');
+  logger.info(
+    { jobId: job.id, parentJobId: job.parent_job_id, retryFrom: job.retry_from_node },
+    'runJob start',
+  );
 
   const { data: flow, error } = await supabase().from('flows').select('graph').eq('id', job.flow_id).single();
   if (error || !flow) throw new Error(`Cannot load flow: ${error?.message}`);
@@ -37,7 +78,32 @@ export async function runJob(job: Job): Promise<{ outputUrl: string }> {
   const order = topologicalSort(graph);
   const outputs = new Map<string, unknown>();
 
+  // If this is a retry, prime outputs from the parent job's completed sub-jobs
+  // so nodes before retry_from_node are skipped.
+  let cachedNodes = new Set<string>();
+  if (job.parent_job_id && job.retry_from_node) {
+    const cache = await buildParentOutputCache(job.parent_job_id);
+    const retryIdx = order.findIndex((n) => n.id === job.retry_from_node);
+    if (retryIdx >= 0) {
+      for (let i = 0; i < retryIdx; i++) {
+        const n = order[i];
+        if (cache.has(n.id)) {
+          outputs.set(n.id, cache.get(n.id));
+          cachedNodes.add(n.id);
+        }
+      }
+      logger.info(
+        { skipped: cachedNodes.size, resumeFrom: job.retry_from_node },
+        'runJob: resuming from cached parent outputs',
+      );
+    }
+  }
+
   for (const node of order) {
+    if (cachedNodes.has(node.id)) {
+      logger.info({ nodeId: node.id, type: node.type }, 'skipping (cached from parent)');
+      continue;
+    }
     logger.info({ nodeId: node.id, type: node.type }, 'executing node');
     const inputs = collectInputs(node, graph, outputs);
     const out = await executeNode(node, inputs, job, graph);

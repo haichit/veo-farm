@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, Key, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, Key, AlertCircle, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { Badge } from '@/components/ui/badge';
@@ -12,8 +12,17 @@ interface Account {
   label: string;
   status: string;
   last_error: string | null;
-  meta: Record<string, unknown>;
+  meta: Record<string, unknown> & { cookies_expire_at?: string };
   created_at: string;
+}
+
+function expiryState(iso: string | undefined): { tone: 'ok' | 'warn' | 'crit'; days: number } | null {
+  if (!iso) return null;
+  const days = Math.round((new Date(iso).getTime() - Date.now()) / 86_400_000);
+  if (days < 0) return { tone: 'crit', days };
+  if (days < 7) return { tone: 'crit', days };
+  if (days < 30) return { tone: 'warn', days };
+  return { tone: 'ok', days };
 }
 
 export default function AccountsPage() {
@@ -92,8 +101,29 @@ export default function AccountsPage() {
                       <div className="font-medium text-sm text-text-primary truncate">
                         {a.label}
                       </div>
-                      <div className="text-[11px] text-text-muted">
-                        added {new Date(a.created_at).toLocaleDateString('vi-VN')}
+                      <div className="text-[11px] text-text-muted flex items-center gap-2 flex-wrap">
+                        <span>added {new Date(a.created_at).toLocaleDateString('vi-VN')}</span>
+                        {(() => {
+                          const e = expiryState(a.meta?.cookies_expire_at);
+                          if (!e) return null;
+                          const cls =
+                            e.tone === 'crit'
+                              ? 'text-error'
+                              : e.tone === 'warn'
+                                ? 'text-warning'
+                                : 'text-text-muted';
+                          const label =
+                            e.days < 0
+                              ? `cookies hết hạn ${-e.days}d trước`
+                              : e.days === 0
+                                ? 'cookies hết hạn hôm nay'
+                                : `cookies còn ${e.days}d`;
+                          return (
+                            <span className={`inline-flex items-center gap-0.5 ${cls}`}>
+                              <Clock className="w-3 h-3" /> {label}
+                            </span>
+                          );
+                        })()}
                       </div>
                       {a.last_error && (
                         <div className="text-[11px] text-error mt-1 flex items-center gap-1 truncate">

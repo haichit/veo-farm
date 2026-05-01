@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
-import { Download, AlertCircle, ImageIcon, Video, Music, ArrowLeft } from 'lucide-react';
+import { useParams, useRouter } from 'next/navigation';
+import { Download, AlertCircle, ImageIcon, Video, Music, ArrowLeft, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { Badge } from '@/components/ui/badge';
@@ -44,7 +44,32 @@ function progressFor(subs: SubJob[]) {
 
 export default function RunDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [data, setData] = useState<RunDetail | null>(null);
+  const [retrying, setRetrying] = useState(false);
+
+  async function retryFromFailed() {
+    if (!data) return;
+    const failedSub = data.sub_jobs.find((s) => s.status === 'failed');
+    if (!failedSub) return;
+    if (!confirm(`Retry từ node "${failedSub.node_id}" (giữ output các node trước)?`)) return;
+    setRetrying(true);
+    try {
+      const r = await fetch(`/api/runs/${id}/retry`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from_node: failedSub.node_id }),
+      });
+      const j = await r.json();
+      if (!r.ok) {
+        alert(`Retry failed: ${j.error}`);
+        return;
+      }
+      router.push(`/runs/${j.id}`);
+    } finally {
+      setRetrying(false);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -117,13 +142,27 @@ export default function RunDetailPage() {
           </div>
         )}
 
-        {data.job.output_url && (
-          <Button asChild variant="primary" className="mt-4" size="sm">
-            <a href={data.job.output_url} target="_blank" rel="noopener noreferrer">
-              <Download className="w-4 h-4" /> Download MP4
-            </a>
-          </Button>
-        )}
+        <div className="mt-4 flex items-center gap-2 flex-wrap">
+          {data.job.output_url && (
+            <Button asChild variant="primary" size="sm">
+              <a href={data.job.output_url} target="_blank" rel="noopener noreferrer">
+                <Download className="w-4 h-4" /> Download MP4
+              </a>
+            </Button>
+          )}
+          {data.job.status === 'failed' &&
+            data.sub_jobs.some((s) => s.status === 'failed') && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={retryFromFailed}
+                disabled={retrying}
+              >
+                <RefreshCw className={`w-4 h-4 ${retrying ? 'animate-spin-slow' : ''}`} />
+                {retrying ? 'Đang tạo...' : 'Retry từ node fail'}
+              </Button>
+            )}
+        </div>
       </GlassCard>
 
       <h2 className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2 px-1">

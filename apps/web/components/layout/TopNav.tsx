@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -99,23 +99,64 @@ export function TopNav({ email }: TopNavProps) {
 }
 
 function ConnectionBadge() {
-  // TODO(sprint-9): wire to Supabase realtime / worker heartbeat
-  const connected = true;
+  const [online, setOnline] = useState<boolean | null>(null);
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    async function poll() {
+      try {
+        const r = await fetch('/api/worker-status', { cache: 'no-store' });
+        const data = await r.json();
+        if (!active) return;
+        setOnline(!!data.online);
+        setCount(
+          (data.workers ?? []).filter((w: any) => (w.age_sec ?? 999) < 30).length,
+        );
+      } catch {
+        if (active) setOnline(false);
+      }
+    }
+    poll();
+    const t = setInterval(poll, 5000);
+    return () => {
+      active = false;
+      clearInterval(t);
+    };
+  }, []);
+
+  const connected = online === true;
+  const label =
+    online === null
+      ? 'Đang kiểm tra...'
+      : connected
+        ? count > 1
+          ? `${count} workers online`
+          : 'Worker online'
+        : 'Worker offline';
+
   return (
     <div
       className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium border
         ${
           connected
             ? 'bg-success-bg border-success/30 text-success'
-            : 'bg-white/[0.03] border-border text-text-muted'
+            : online === false
+              ? 'bg-error-bg border-error/30 text-error'
+              : 'bg-white/[0.03] border-border text-text-muted'
         }`}
+      title={online === false ? 'pnpm --filter @veo-farm/worker dev' : undefined}
     >
       <span
         className={`w-1.5 h-1.5 rounded-full ${
-          connected ? 'bg-success shadow-[0_0_6px_currentColor]' : 'bg-text-muted'
+          connected
+            ? 'bg-success shadow-[0_0_6px_currentColor]'
+            : online === false
+              ? 'bg-error'
+              : 'bg-text-muted'
         }`}
       />
-      {connected ? 'Worker online' : 'Chưa kết nối'}
+      {label}
     </div>
   );
 }
