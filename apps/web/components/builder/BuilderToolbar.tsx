@@ -49,19 +49,32 @@ export function BuilderToolbar() {
         targetHandle: e.targetHandle ?? '',
       })),
     };
-    const r = await fetch('/api/run-workflow-builder', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ workflow, workflowId: currentWorkflowId }),
-    });
-    if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      alert(`Run failed: ${err?.error ?? r.statusText}`);
+    try {
+      // eslint-disable-next-line no-console
+      console.log('[builder] POST /api/run-workflow-builder', { nodes: nodes.length, edges: edges.length });
+      const r = await fetch('/api/run-workflow-builder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workflow, workflowId: currentWorkflowId }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        // eslint-disable-next-line no-console
+        console.error('[builder] run failed', r.status, err);
+        alert(`Run failed (${r.status}): ${err?.error ?? r.statusText}`);
+        setRunState('idle');
+        return;
+      }
+      const { jobId } = await r.json();
+      // eslint-disable-next-line no-console
+      console.log('[builder] job created', jobId, '— waiting for worker pickup');
+      setCurrentJobId(jobId);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[builder] network error', e);
+      alert(`Network error: ${(e as Error).message ?? e}`);
       setRunState('idle');
-      return;
     }
-    const { jobId } = await r.json();
-    setCurrentJobId(jobId);
   }
 
   async function pauseRun() {
