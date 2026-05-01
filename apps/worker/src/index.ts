@@ -1,6 +1,6 @@
 import './_loadEnv.js';
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { logger } from './core/logger.js';
 import { supabase } from './core/supabase.js';
 import { runJob } from './core/job-runner.js';
@@ -85,6 +85,12 @@ async function resetStuckJobs() {
 }
 
 async function heartbeat() {
+  // Local marker for Docker HEALTHCHECK (mtime-based liveness probe).
+  try {
+    writeFileSync('/tmp/worker-alive', String(Date.now()));
+  } catch {
+    /* ignore — in case /tmp is read-only */
+  }
   const { error } = await supabase()
     .from('worker_heartbeats')
     .upsert(

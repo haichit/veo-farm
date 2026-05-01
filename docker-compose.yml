@@ -1,0 +1,43 @@
+# Local one-shot bring-up for self-hosted production-like deploy.
+# Vercel + Railway is the recommended hosted setup; this file is for VPS / dev.
+#
+# Usage:
+#   cp .env.example .env  &&  edit  &&  docker compose up -d
+#
+# Note: Veo3 plugin requires headful Brave with login state. Headless modes
+# usually trip Google anti-bot; for production deploy that wants headless,
+# pre-bake the profile dir on the host at /var/lib/veo-farm-profiles.
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    env_file: .env
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    env_file: .env
+    environment:
+      WORKER_PROFILES_DIR: /data/veo-farm-profiles
+      BRAVE_PATH: /usr/bin/brave-browser
+    volumes:
+      - veo-farm-profiles:/data/veo-farm-profiles
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+
+volumes:
+  veo-farm-profiles:
