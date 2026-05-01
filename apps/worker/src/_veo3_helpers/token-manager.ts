@@ -74,7 +74,28 @@ export class TokenManager {
     if (opts.chromeExecutablePath) launchOpts.executablePath = opts.chromeExecutablePath;
     if (opts.userDataDir) launchOpts.userDataDir = opts.userDataDir;
 
-    this._browser = (await puppeteerExtra.launch(launchOpts)) as Browser;
+    // Kill any stale browser processes still holding our userDataDir lock from a
+    // crashed previous run. browser.close() can leave subprocesses alive on macOS.
+    if (opts.userDataDir) {
+      await killStaleProfileProcesses(opts.userDataDir);
+    }
+
+    // Retry launch with backoff in case the OS hasn't fully released the lock yet.
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        this._browser = (await puppeteerExtra.launch(launchOpts)) as Browser;
+        lastErr = null;
+        break;
+      } catch (err: any) {
+        lastErr = err;
+        const msg = String(err?.message ?? err);
+        if (!msg.includes('already running')) throw err;
+        if (opts.userDataDir) await killStaleProfileProcesses(opts.userDataDir);
+        await sleep(3000);
+      }
+    }
+    if (!this._browser) throw lastErr ?? new Error('TokenManager.launch: browser is null');
 
     const pages = await this._browser.pages();
     this._page = pages.length > 0 ? pages[0] : await this._browser.newPage();
@@ -191,29 +212,60 @@ export class TokenManager {
     // In-page execute (preferred — no socket.io / cert hassles).
     if (this._page) {
       try {
-        const token = await this._page.evaluate(
-          async (siteKey: string, act: string) => {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const w = globalThis as any;
-            const start = Date.now();
-            while (Date.now() - start < 30_000) {
-              if (w.grecaptcha?.enterprise?.execute) {
-                try {
-                  return await w.grecaptcha.enterprise.execute(siteKey, { action: act });
-                } catch (e: any) {
-                  return null;
-                }
-              }
-              await new Promise((r) => setTimeout(r, 200));
-            }
-            return null;
-          },
-          RECAPTCHA_SITE_KEY,
-          action,
+        // 1) Wait until grecaptcha SDK is loaded. waitForFunction survives
+        //    navigation/context destruction (auto-rebinds to new frame).
+        await this._page.waitForFunction(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          () => !!(globalThis as any).grecaptcha?.enterprise?.execute,
+          { timeout: 60_000, polling: 500 },
         );
-        if (typeof token === 'string' && token.length > 0) return token;
-      } catch {
-        // fall back to captcha-server
+
+        // 2) Execute grecaptcha. Retry on transient "context destroyed" /
+        //    "Target closed" errors that can happen during Flow SPA route changes.
+        for (let attempt = 0; attempt < 5; attempt++) {
+          if (attempt > 0) await sleep(2000);
+          try {
+            const result = await this._page.evaluate(
+              async (siteKey: string, act: string) => {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const ent = (globalThis as any).grecaptcha?.enterprise;
+                if (!ent?.execute) return { ok: false, reason: 'no-grecaptcha' };
+                if (ent.ready) {
+                  await new Promise<void>((resolve) => ent.ready(() => resolve()));
+                }
+                try {
+                  const tok = await ent.execute(siteKey, { action: act });
+                  return { ok: true, token: tok };
+                } catch (e: any) {
+                  return { ok: false, reason: 'execute-threw', err: String(e?.message ?? e) };
+                }
+              },
+              RECAPTCHA_SITE_KEY,
+              action,
+            );
+            if (result?.ok && typeof result.token === 'string' && result.token.length > 0) {
+              return result.token;
+            }
+            console.warn(
+              `[TokenManager] grecaptcha returned no token (attempt ${attempt + 1}/5):`,
+              (result as any)?.reason,
+              (result as any)?.err ?? '',
+            );
+          } catch (e: any) {
+            const msg = String(e?.message ?? e);
+            console.warn(
+              `[TokenManager] in-page evaluate threw (attempt ${attempt + 1}/5):`,
+              msg,
+            );
+            const transient =
+              msg.includes('Execution context was destroyed') ||
+              msg.includes('Target closed') ||
+              msg.includes('Protocol error');
+            if (!transient) break;
+          }
+        }
+      } catch (e: any) {
+        console.warn('[TokenManager] waitForFunction failed:', e?.message ?? e);
       }
     }
     return this._captchaBridge.getToken(action);
@@ -242,7 +294,22 @@ export class TokenManager {
     this._browser = null;
     this._page = null;
     this._cdp = null;
+    // Wait for OS to release the userDataDir lock (Brave subprocesses can linger
+    // for a couple seconds after CDP says the browser is closed).
+    await sleep(2000);
   }
+}
+
+async function killStaleProfileProcesses(userDataDir: string): Promise<void> {
+  const { exec } = await import('node:child_process');
+  await new Promise<void>((resolve) => {
+    // pgrep matches command line; kill -9 any process whose argv contains our profile dir.
+    exec(
+      `pgrep -f ${JSON.stringify(userDataDir)} | xargs kill -9 2>/dev/null; true`,
+      () => resolve(),
+    );
+  });
+  await sleep(500);
 }
 
 function sleep(ms: number): Promise<void> {

@@ -112,6 +112,10 @@ async function buildContext(
   };
 }
 
+// Plugins that manage their own browser (puppeteer + persistent profile).
+// withProvider skips playwright-pool for these so the userDataDir isn't double-locked.
+const STANDALONE_BROWSER_PROVIDERS = new Set(['veo3', 'veo3_flow_v2']);
+
 async function withProvider<T>(
   kind: ProviderKind,
   providerId: string,
@@ -123,10 +127,16 @@ async function withProvider<T>(
   const account = await claimAccount(job.user_id, providerId);
   try {
     const cookies = decryptCookies(account);
-    const result = await withPage(account, cookies, async (page) => {
-      const ctx = await buildContext(account, page, job);
-      return await fn(plugin, ctx);
-    });
+    let result: T;
+    if (STANDALONE_BROWSER_PROVIDERS.has(providerId)) {
+      const ctx = await buildContext(account, null, job);
+      result = await fn(plugin, ctx);
+    } else {
+      result = await withPage(account, cookies, async (page) => {
+        const ctx = await buildContext(account, page, job);
+        return await fn(plugin, ctx);
+      });
+    }
     await releaseAccount(account.id, cooldownSec, 'idle');
     return { result, accountId: account.id };
   } catch (err: any) {
