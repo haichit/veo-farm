@@ -16,7 +16,7 @@ import { useKeyboardShortcuts } from '@/lib/builder/use-keyboard-shortcuts';
 import { useJobSubscription } from '@/lib/builder/use-job-subscription';
 import { customNodeTypes } from './nodes';
 import { customEdgeTypes } from './edges';
-import { PALETTE_DRAG_MIME } from './NodePalette';
+import { PALETTE_DRAG_MIME, getDraggedType } from './NodePalette';
 import { NODE_TYPES, type BuilderNodeType } from '@/lib/builder/node-types';
 
 // Wraps React Flow with our store handlers, drag-drop from the palette, and
@@ -49,13 +49,18 @@ export function BuilderCanvas() {
     (e: React.DragEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      // Try the custom MIME first; fall back to text/plain for browsers that
-      // strip non-standard types during drag.
+      // Try sources in order: module ref (most reliable) → custom MIME →
+      // text/plain. Some browsers/extensions strip dataTransfer payloads.
       const raw =
+        getDraggedType() ||
         e.dataTransfer.getData(PALETTE_DRAG_MIME) ||
         e.dataTransfer.getData('text/plain');
       const type = raw as BuilderNodeType;
-      if (!type || !NODE_TYPES[type]) return;
+      if (!type || !NODE_TYPES[type]) {
+        // eslint-disable-next-line no-console
+        console.warn('[builder] drop ignored — no recognised node type', { raw });
+        return;
+      }
       const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
       addNode(type, position);
     },
