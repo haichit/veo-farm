@@ -12,7 +12,8 @@ interface Account {
   label: string;
   status: string;
   last_error: string | null;
-  meta: Record<string, unknown> & { cookies_expire_at?: string };
+  meta: Record<string, unknown> & { cookies_expire_at?: string; daily_quota?: number };
+  usage_today?: number;
   created_at: string;
 }
 
@@ -132,6 +133,32 @@ export default function AccountsPage() {
                         </div>
                       )}
                     </div>
+                    {(() => {
+                      const used = a.usage_today ?? 0;
+                      const quota = a.meta?.daily_quota;
+                      if (typeof quota === 'number' && quota > 0) {
+                        const pct = used / quota;
+                        const tone =
+                          pct >= 1
+                            ? 'text-error'
+                            : pct >= 0.8
+                              ? 'text-warning'
+                              : 'text-text-muted';
+                        return (
+                          <span className={`text-[11px] ${tone} tabular-nums`} title="Used today / daily quota">
+                            {used}/{quota}
+                          </span>
+                        );
+                      }
+                      if (used > 0) {
+                        return (
+                          <span className="text-[11px] text-text-muted tabular-nums">
+                            {used} hôm nay
+                          </span>
+                        );
+                      }
+                      return null;
+                    })()}
                     <Badge status={a.status}>{a.status}</Badge>
                     <button
                       type="button"

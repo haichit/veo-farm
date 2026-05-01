@@ -36,3 +36,15 @@ export function decryptCookies(account: Account): Cookie[] {
   const json = decrypt(account.cookies_encrypted);
   return JSON.parse(json) as Cookie[];
 }
+
+/**
+ * Increment today's usage counter for an account (Sprint 10 quota tracking).
+ * Call after a successful video/image/voice generation. The claim_account RPC
+ * skips accounts that hit their meta.daily_quota.
+ */
+export async function incrementAccountUsage(accountId: string): Promise<void> {
+  const { error } = await supabase().rpc('increment_account_usage', {
+    p_account_id: accountId,
+  });
+  if (error) logger.warn({ err: error.message, accountId }, 'increment_account_usage failed');
+}

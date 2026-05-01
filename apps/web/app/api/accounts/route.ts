@@ -21,7 +21,24 @@ export async function GET(req: Request) {
     const usable = (data ?? []).filter((a) => a.status === 'idle' || a.status === 'cooldown');
     return NextResponse.json({ count: usable.length });
   }
-  return NextResponse.json(data);
+
+  // Annotate each account with today's usage so the UI can show "12/50 today".
+  const today = new Date().toISOString().slice(0, 10);
+  const ids = (data ?? []).map((a) => a.id);
+  let usage: Record<string, number> = {};
+  if (ids.length > 0) {
+    const { data: usageRows } = await sb
+      .from('account_usage')
+      .select('account_id, count')
+      .in('account_id', ids)
+      .eq('usage_date', today);
+    for (const r of usageRows ?? []) usage[r.account_id] = r.count;
+  }
+  const annotated = (data ?? []).map((a) => ({
+    ...a,
+    usage_today: usage[a.id] ?? 0,
+  }));
+  return NextResponse.json(annotated);
 }
 
 const createSchema = z.object({

@@ -13,7 +13,7 @@ import type {
 import { logger } from './logger.js';
 import { supabase } from './supabase.js';
 import { topologicalSort, getIncomingNodes } from './graph.js';
-import { claimAccount, releaseAccount, decryptCookies } from './account-pool.js';
+import { claimAccount, releaseAccount, decryptCookies, incrementAccountUsage } from './account-pool.js';
 import { withPage } from './playwright-pool.js';
 import { uploadBuffer } from './storage.js';
 import { createSubJob, completeSubJob, failSubJob } from './sub-jobs.js';
@@ -182,6 +182,9 @@ async function buildContext(
 // withProvider skips playwright-pool for these so the userDataDir isn't double-locked.
 const STANDALONE_BROWSER_PROVIDERS = new Set(['veo3', 'veo3_flow_v2']);
 
+// Plugin kinds whose successful invocations count toward daily quota.
+const QUOTA_TRACKED_KINDS = new Set<ProviderKind>(['video', 'image']);
+
 async function withProvider<T>(
   kind: ProviderKind,
   providerId: string,
@@ -204,6 +207,9 @@ async function withProvider<T>(
       });
     }
     await releaseAccount(account.id, cooldownSec, 'idle');
+    if (QUOTA_TRACKED_KINDS.has(kind)) {
+      await incrementAccountUsage(account.id);
+    }
     return { result, accountId: account.id };
   } catch (err: any) {
     const msg = String(err?.message ?? err);
