@@ -24,6 +24,7 @@ import { VoiceGenNode } from '../nodes/VoiceGenNode';
 import { ConcatNode } from '../nodes/ConcatNode';
 import { DownloadNode } from '../nodes/DownloadNode';
 import { FlowOutputsProvider } from '@/lib/hooks/useFlowOutputs';
+import { NodePalette } from './NodePalette';
 
 const nodeTypes = {
   ideaInput: IdeaInputNode,
@@ -50,6 +51,23 @@ export default function FlowCanvas({ flowId, initialNodes, initialEdges }: Props
   const onNodesChange = useCallback((changes: NodeChange[]) => setNodes((ns) => applyNodeChanges(changes, ns)), []);
   const onEdgesChange = useCallback((changes: EdgeChange[]) => setEdges((es) => applyEdgeChanges(changes, es)), []);
   const onConnect = useCallback((c: Connection) => setEdges((es) => addEdge(c, es)), []);
+
+  const addNode = useCallback((type: string, data: Record<string, unknown>) => {
+    setNodes((ns) => {
+      // Stagger position so successive adds don't overlap.
+      const idx = ns.length;
+      const id = `${type}-${Date.now().toString(36)}`;
+      return [
+        ...ns,
+        {
+          id,
+          type,
+          position: { x: 80 + (idx % 4) * 320, y: 80 + Math.floor(idx / 4) * 220 },
+          data,
+        },
+      ];
+    });
+  }, []);
 
   // Debounced auto-save
   useEffect(() => {
@@ -111,6 +129,7 @@ export default function FlowCanvas({ flowId, initialNodes, initialEdges }: Props
         </ReactFlow>
       </ReactFlowProvider>
       </FlowOutputsProvider>
+      <NodePalette onAdd={addNode} />
     </div>
   );
 }
