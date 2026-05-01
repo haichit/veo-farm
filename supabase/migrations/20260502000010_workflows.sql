@@ -47,3 +47,6 @@ ALTER TABLE public.jobs
 
 COMMENT ON COLUMN public.jobs.workflow_id IS
   'When the job was launched from the Builder Canvas, points at the workflow that produced flow_graph. NULL = legacy /flows job.';
+
+-- Note: subsequent jobs columns (flow_graph, stats), the nullability of
+-- flow_id and the origin check live in 20260502000011_jobs_builder.sql.

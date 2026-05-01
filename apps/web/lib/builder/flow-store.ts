@@ -239,8 +239,15 @@ export const useFlowStore = create<FlowStoreState>((set, get) => ({
       data: { config: { ...def.defaults }, status: 'idle' },
       width: def.width,
       height: def.minHeight,
+      // Frames render behind other nodes so children appear grouped within them.
+      ...(type === 'frame' ? { zIndex: -1 } : {}),
     };
-    set((s) => ({ nodes: [...s.nodes, node], selectedNodeId: id, selectedNodeIds: [id] }));
+    set((s) => ({
+      // Prepend frames so React Flow paints them first (lower z layer).
+      nodes: type === 'frame' ? [node, ...s.nodes] : [...s.nodes, node],
+      selectedNodeId: id,
+      selectedNodeIds: [id],
+    }));
     return id;
   },
   updateNodeData: (id, patch) =>

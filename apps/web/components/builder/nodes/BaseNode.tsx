@@ -34,9 +34,28 @@ export function BaseNode(props: BaseNodeProps) {
   const def = NODE_TYPES[type as BuilderNodeType];
   const status = (data as BuilderNodeData)?.status ?? 'idle';
   const error = (data as BuilderNodeData)?.error;
-  const removeNodes = useFlowStore((s) => s.removeNodes);
+  const previewMedia = (data as BuilderNodeData)?.previewMedia ?? [];
   const edges = useFlowStore((s) => s.edges);
   const node = useFlowStore((s) => s.nodes.find((n) => n.id === id));
+  const selectNode = useFlowStore((s) => s.selectNode);
+
+  // Auto-derive showDownload when caller didn't override it.
+  const effectiveShowDownload = showDownload ?? previewMedia.length > 0;
+  // Default Info click → open right editor panel.
+  const effectiveInfoClick = onInfoClick ?? (() => selectNode(id));
+  // Default Download click → open first media in a new tab.
+  const effectiveDownload =
+    onDownload ??
+    (() => {
+      const m = previewMedia[0];
+      if (!m) return;
+      const a = document.createElement('a');
+      a.href = m.url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.download = '';
+      a.click();
+    });
 
   const dynamicInputs = useMemo(() => {
     if (!node) return def?.inputs ?? [];
@@ -145,13 +164,13 @@ export function BaseNode(props: BaseNodeProps) {
         {/* Header buttons (right) */}
         <div className="flex items-center gap-1 shrink-0">
           {status === 'running' && <Loader2 className="animate-spin text-info" size={14} />}
-          {status === 'done' && !showDownload && <CheckCircle2 className="text-success" size={14} />}
+          {status === 'done' && !effectiveShowDownload && <CheckCircle2 className="text-success" size={14} />}
           {status === 'error' && <AlertCircle className="text-error" size={14} />}
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              onInfoClick?.();
+              effectiveInfoClick();
             }}
             onMouseDown={(e) => e.stopPropagation()}
             className="nodrag w-[22px] h-[22px] flex items-center justify-center rounded text-[#a0aec0] hover:bg-white/10"
@@ -159,12 +178,12 @@ export function BaseNode(props: BaseNodeProps) {
           >
             <Info size={12} />
           </button>
-          {showDownload && (
+          {effectiveShowDownload && (
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                onDownload?.();
+                effectiveDownload();
               }}
               onMouseDown={(e) => e.stopPropagation()}
               className="nodrag w-[22px] h-[22px] flex items-center justify-center rounded text-success hover:bg-success/10"

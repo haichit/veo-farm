@@ -3,10 +3,11 @@
 import { Play, Pause, Square, Image as ImageIcon, ZoomIn } from 'lucide-react';
 import { useReactFlow } from '@xyflow/react';
 import { useFlowStore } from '@/lib/builder/flow-store';
+import type { WorkflowJSON } from '@veo-farm/shared';
 
 // Top toolbar inside the canvas column — Run/Pause/Stop + stats counter +
-// Album button. Run/pause/stop wiring lands in Day 7; today the buttons just
-// flip runState locally so layout + dynamic visibility can be verified.
+// Album button. Hits /api/run-workflow-builder + companion endpoints; the
+// flow-store updates from Realtime via useJobSubscription on the page.
 export function BuilderToolbar() {
   const runState = useFlowStore((s) => s.runState);
   const setRunState = useFlowStore((s) => s.setRunState);
@@ -14,13 +15,85 @@ export function BuilderToolbar() {
   const openAlbum = useFlowStore((s) => s.openAlbum);
   const albumCount = useFlowStore((s) => s.albumMedia.length);
   const resetAllNodeStatus = useFlowStore((s) => s.resetAllNodeStatus);
+  const setCurrentJobId = useFlowStore((s) => s.setCurrentJobId);
+  const currentJobId = useFlowStore((s) => s.currentJobId);
+  const nodes = useFlowStore((s) => s.nodes);
+  const edges = useFlowStore((s) => s.edges);
+  const currentWorkflowId = useFlowStore((s) => s.currentWorkflowId);
+  const currentWorkflowName = useFlowStore((s) => s.currentWorkflowName);
   const { fitView } = useReactFlow();
+
+  async function startRun() {
+    if (nodes.length === 0) {
+      alert('Workflow chưa có node nào.');
+      return;
+    }
+    resetAllNodeStatus();
+    setRunState('running');
+    const workflow: WorkflowJSON = {
+      version: '1.0',
+      name: currentWorkflowName,
+      nodes: nodes.map((n) => ({
+        id: n.id,
+        type: n.type ?? 'prompt',
+        position: n.position,
+        data: { config: n.data?.config ?? {}, label: n.data?.label },
+        width: n.width,
+        height: n.height,
+      })),
+      edges: edges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.sourceHandle ?? '',
+        targetHandle: e.targetHandle ?? '',
+      })),
+    };
+    const r = await fetch('/api/run-workflow-builder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workflow, workflowId: currentWorkflowId }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      alert(`Run failed: ${err?.error ?? r.statusText}`);
+      setRunState('idle');
+      return;
+    }
+    const { jobId } = await r.json();
+    setCurrentJobId(jobId);
+  }
+
+  async function pauseRun() {
+    if (!currentJobId) return;
+    setRunState('paused');
+    await fetch('/api/workflow-builder-pause', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jobId: currentJobId }),
+    });
+  }
+
+  async function stopRun() {
+    if (!confirm('Dừng workflow đang chạy?')) return;
+    if (currentJobId) {
+      await fetch('/api/workflow-builder-stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId: currentJobId }),
+      });
+    }
+    setRunState('stopped');
+    resetAllNodeStatus();
+    setCurrentJobId(null);
+    setTimeout(() => setRunState('idle'), 300);
+  }
 
   return (
     <div className="flex items-center gap-3 px-3.5 py-2 bg-bg-secondary border-b border-border shrink-0">
       <button
         type="button"
-        onClick={() => setRunState('running')}
+        onClick={startRun}
         disabled={runState === 'running'}
         className="flex items-center gap-1.5 px-4 py-1.5 rounded-md text-xs font-semibold bg-gradient-to-br from-accent to-accent-hover text-white shadow-accent-glow disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-accent-glow-lg transition-all"
       >
@@ -31,7 +104,7 @@ export function BuilderToolbar() {
       {runState === 'running' && (
         <button
           type="button"
-          onClick={() => setRunState('paused')}
+          onClick={pauseRun}
           className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-semibold bg-gradient-to-br from-warning to-[#d97706] text-white"
         >
           <Pause size={16} />
@@ -42,13 +115,7 @@ export function BuilderToolbar() {
       {(runState === 'running' || runState === 'paused') && (
         <button
           type="button"
-          onClick={() => {
-            if (confirm('Dừng workflow đang chạy?')) {
-              setRunState('stopped');
-              resetAllNodeStatus();
-              setTimeout(() => setRunState('idle'), 300);
-            }
-          }}
+          onClick={stopRun}
           className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-semibold bg-gradient-to-br from-error to-[#dc2626] text-white"
         >
           <Square size={16} />

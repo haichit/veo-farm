@@ -7,6 +7,7 @@ import { BuilderCanvas } from '@/components/builder/BuilderCanvas';
 import { BuilderToolbar } from '@/components/builder/BuilderToolbar';
 import { NodePalette } from '@/components/builder/NodePalette';
 import { WorkflowControls } from '@/components/builder/WorkflowControls';
+import { NodeEditorPanel } from '@/components/builder/NodeEditorPanel';
 import { useFlowStore } from '@/lib/builder/flow-store';
 
 export default function CanvasFlowPage() {
@@ -14,6 +15,7 @@ export default function CanvasFlowPage() {
   const flowId = params?.flowId;
   const loadWorkflow = useFlowStore((s) => s.loadWorkflow);
   const newWorkflow = useFlowStore((s) => s.newWorkflow);
+  const hasSelection = useFlowStore((s) => !!s.selectedNodeId);
 
   useEffect(() => {
     if (!flowId || flowId === 'new') {
@@ -35,6 +37,7 @@ export default function CanvasFlowPage() {
       }
       toolbar={<BuilderToolbar />}
       canvas={<BuilderCanvas />}
+      editor={hasSelection ? <NodeEditorPanel /> : undefined}
     />
   );
 }
