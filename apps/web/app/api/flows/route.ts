@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { defaultFlowGraph } from '@/lib/flow/default-flows';
+import { FLOW_TEMPLATES, type FlowTemplateId } from '@/lib/flow/default-flows';
 
 export async function GET() {
   const sb = createSupabaseServerClient();
@@ -19,15 +19,20 @@ export async function POST(req: Request) {
 
   const body = await req.json().catch(() => ({}));
   const name = body.name ?? 'Flow mới';
-  const useTemplate = body.template !== false;
+  const templateId: FlowTemplateId | null =
+    body.template === false || body.template === 'blank'
+      ? null
+      : ((body.template as FlowTemplateId | undefined) ?? 'full');
+  const tmpl = templateId ? FLOW_TEMPLATES[templateId] : null;
+  const description = body.description ?? tmpl?.description ?? null;
 
   const { data, error } = await sb
     .from('flows')
     .insert({
       user_id: user.id,
       name,
-      description: body.description ?? null,
-      graph: useTemplate ? defaultFlowGraph() : { nodes: [], edges: [] },
+      description,
+      graph: tmpl ? tmpl.graph() : { nodes: [], edges: [] },
     })
     .select()
     .single();

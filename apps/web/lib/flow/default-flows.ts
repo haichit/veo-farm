@@ -78,3 +78,102 @@ export function defaultFlowGraph(): FlowGraph {
     ],
   };
 }
+
+/** Minimal: text → script → video → concat → download (no image, no voice). */
+export function minimalFlowGraph(): FlowGraph {
+  return {
+    nodes: [
+      { id: 'idea', type: 'ideaInput', position: { x: 0, y: 200 }, data: { label: 'Idea', value: '' } },
+      {
+        id: 'script',
+        type: 'scriptWriter',
+        position: { x: 280, y: 200 },
+        data: { provider: 'claude', config: { system_prompt: DEFAULT_SYSTEM_PROMPT } },
+      },
+      {
+        id: 'video',
+        type: 'videoRender',
+        position: { x: 600, y: 200 },
+        data: { provider: 'veo3', concurrency: 1 },
+      },
+      {
+        id: 'concat',
+        type: 'concat',
+        position: { x: 920, y: 200 },
+        data: { config: { transition: 'fade', music_url: null, add_caption: false } },
+      },
+      { id: 'download', type: 'download', position: { x: 1240, y: 200 }, data: {} },
+    ],
+    edges: [
+      { id: 'e1', source: 'idea', target: 'script' },
+      { id: 'e2', source: 'script', target: 'video' },
+      { id: 'e3', source: 'video', target: 'concat' },
+      { id: 'e4', source: 'concat', target: 'download' },
+    ],
+  };
+}
+
+/** Veo + voice (no image): script → video + voice → concat. Cleaner narration than veo_native. */
+export function veoVoiceFlowGraph(): FlowGraph {
+  return {
+    nodes: [
+      { id: 'idea', type: 'ideaInput', position: { x: 0, y: 200 }, data: { label: 'Idea', value: '' } },
+      {
+        id: 'script',
+        type: 'scriptWriter',
+        position: { x: 280, y: 200 },
+        data: { provider: 'claude', config: { system_prompt: DEFAULT_SYSTEM_PROMPT } },
+      },
+      {
+        id: 'video',
+        type: 'videoRender',
+        position: { x: 600, y: 120 },
+        data: { provider: 'veo3', concurrency: 1 },
+      },
+      {
+        id: 'voice',
+        type: 'voiceGen',
+        position: { x: 600, y: 320 },
+        data: { provider: 'elevenlabs', config: { voice_id: 'default' } },
+      },
+      {
+        id: 'concat',
+        type: 'concat',
+        position: { x: 920, y: 220 },
+        data: { config: { transition: 'fade', music_url: null, add_caption: true } },
+      },
+      { id: 'download', type: 'download', position: { x: 1240, y: 220 }, data: {} },
+    ],
+    edges: [
+      { id: 'e1', source: 'idea', target: 'script' },
+      { id: 'e2', source: 'script', target: 'video' },
+      { id: 'e3', source: 'script', target: 'voice' },
+      { id: 'e4', source: 'video', target: 'concat' },
+      { id: 'e5', source: 'voice', target: 'concat' },
+      { id: 'e6', source: 'concat', target: 'download' },
+    ],
+  };
+}
+
+export const FLOW_TEMPLATES = {
+  full: {
+    id: 'full',
+    name: 'Full pipeline',
+    description: 'Idea → Script → Image → Voice → Video → Concat → Download (8 nodes)',
+    graph: defaultFlowGraph,
+  },
+  minimal: {
+    id: 'minimal',
+    name: 'Minimal text-to-video',
+    description: 'Idea → Script → Video → Concat → Download (5 nodes, no image/voice)',
+    graph: minimalFlowGraph,
+  },
+  voice: {
+    id: 'voice',
+    name: 'Veo + ElevenLabs voice',
+    description: 'Like minimal but adds ElevenLabs voiceover lane',
+    graph: veoVoiceFlowGraph,
+  },
+} as const;
+
+export type FlowTemplateId = keyof typeof FLOW_TEMPLATES;

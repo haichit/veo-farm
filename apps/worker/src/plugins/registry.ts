@@ -14,6 +14,7 @@ import { DallEImagePlugin } from './image/dalle.js';
 import { GeminiImagePlugin } from './image/gemini.js';
 import { Veo3VideoPlugin } from './video/veo3_legacy.js';
 import { Veo3FlowV2Plugin } from './video/veo3_flow_v2.js';
+import { SoraVideoPlugin } from './video/sora.js';
 import { VeoNativeVoicePlugin } from './voice/veo_native.js';
 import { ElevenLabsVoicePlugin } from './voice/elevenlabs.js';
 
@@ -33,6 +34,7 @@ const video: Record<string, VideoProvider> = {
   veo3: Veo3FlowV2Plugin,           // primary (Flow API replica)
   veo3_flow_v2: Veo3FlowV2Plugin,   // alias
   veo3_legacy: Veo3VideoPlugin,     // Playwright fallback
+  sora: SoraVideoPlugin,            // scaffold — DOM selectors not mapped yet
 };
 
 const voice: Record<string, VoiceProvider> = {
