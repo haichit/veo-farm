@@ -15,7 +15,11 @@ build/
 .env
 .env.local
 .env.*.local
+.env.backup
 !.env.example
+
+# Claude Code worktrees
+.claude/worktrees/
 
 # Logs
 *.log

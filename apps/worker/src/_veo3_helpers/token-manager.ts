@@ -11,7 +11,7 @@ import puppeteerExtra from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import type { Browser, Page, CDPSession } from 'puppeteer-core';
 import { CaptchaBridge } from './captcha-bridge.js';
-import { LABS_BASE } from './constants.js';
+import { LABS_BASE, RECAPTCHA_SITE_KEY } from './constants.js';
 
 puppeteerExtra.use(StealthPlugin());
 
@@ -59,12 +59,17 @@ export class TokenManager {
       '--disable-features=IsolateOrigins,site-per-process',
       `--load-extension=${extPath}`,
       `--disable-extensions-except=${extPath}`,
+      // Trust captcha-server's self-signed cert so extension can WS to https://127.0.0.1:3456.
+      '--ignore-certificate-errors',
+      '--allow-insecure-localhost',
     ];
 
     const launchOpts: any = {
       headless: opts.headless ?? false,
       args,
       defaultViewport: { width: 1280, height: 800 },
+      ignoreHTTPSErrors: true,
+      acceptInsecureCerts: true,
     };
     if (opts.chromeExecutablePath) launchOpts.executablePath = opts.chromeExecutablePath;
     if (opts.userDataDir) launchOpts.userDataDir = opts.userDataDir;
@@ -73,6 +78,16 @@ export class TokenManager {
 
     const pages = await this._browser.pages();
     this._page = pages.length > 0 ? pages[0] : await this._browser.newPage();
+    // Close any other tabs left over from previous (possibly crashed) sessions.
+    for (const p of pages) {
+      if (p !== this._page) {
+        try {
+          await p.close();
+        } catch {
+          /* ignore */
+        }
+      }
+    }
     this._cdp = await (this._page as any).target().createCDPSession();
 
     // Inject cookies if provided (works with launchPersistentContext too).
@@ -86,8 +101,25 @@ export class TokenManager {
 
     this._attachTokenInterceptor();
 
+    // Forward browser-page console to stdout so extension logs are visible.
+    this._page.on('console', (msg) => {
+      const text = msg.text();
+      if (
+        text.includes('Veo-Farm') ||
+        text.includes('Captcha') ||
+        text.includes('socket.io')
+      ) {
+        // eslint-disable-next-line no-console
+        console.log(`[browser:${msg.type()}] ${text}`);
+      }
+    });
+    this._page.on('pageerror', (e: unknown) => {
+      // eslint-disable-next-line no-console
+      console.error('[browser:pageerror]', (e as Error)?.message ?? e);
+    });
+
     await this._page.goto(`${LABS_BASE}/fx/vi/tools/flow`, {
-      waitUntil: 'networkidle2',
+      waitUntil: 'domcontentloaded',
       timeout: 90_000,
     });
 
@@ -151,7 +183,39 @@ export class TokenManager {
     throw new Error('Failed to extract Bearer token from labs.google requests');
   }
 
+  /**
+   * Resolve a reCAPTCHA Enterprise token. Prefers in-page grecaptcha.execute (no captcha-server
+   * needed) and falls back to the local captcha-server bridge.
+   */
   async getRecaptchaToken(action: string): Promise<string> {
+    // In-page execute (preferred — no socket.io / cert hassles).
+    if (this._page) {
+      try {
+        const token = await this._page.evaluate(
+          async (siteKey: string, act: string) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const w = globalThis as any;
+            const start = Date.now();
+            while (Date.now() - start < 30_000) {
+              if (w.grecaptcha?.enterprise?.execute) {
+                try {
+                  return await w.grecaptcha.enterprise.execute(siteKey, { action: act });
+                } catch (e: any) {
+                  return null;
+                }
+              }
+              await new Promise((r) => setTimeout(r, 200));
+            }
+            return null;
+          },
+          RECAPTCHA_SITE_KEY,
+          action,
+        );
+        if (typeof token === 'string' && token.length > 0) return token;
+      } catch {
+        // fall back to captcha-server
+      }
+    }
     return this._captchaBridge.getToken(action);
   }
 

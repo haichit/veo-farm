@@ -1,6 +1,9 @@
 // Veo 3 Flow API replica — primary video plugin (uses got-scraping HTTP + Puppeteer for token).
 // Reference: SPEC_REPLICA_BACKEND.md section 18.15.
 
+import path from 'node:path';
+import { homedir } from 'node:os';
+import { mkdirSync } from 'node:fs';
 import type { VideoProvider } from '@veo-farm/shared';
 import { ApiClient } from '../../_veo3_helpers/api-client.js';
 import { TokenManager } from '../../_veo3_helpers/token-manager.js';
@@ -8,6 +11,9 @@ import { downloadVideoViaCDP } from '../../_veo3_helpers/cdp-downloader.js';
 import { RateLimiter } from '../../core/concurrency.js';
 import { downloadFromUrl } from '../../core/storage.js';
 import { RATE_LIMIT_DELAY_MS } from '../../_veo3_helpers/constants.js';
+
+const PROFILES_DIR =
+  process.env.WORKER_PROFILES_DIR ?? path.join(homedir(), '.veo-farm-profiles');
 
 const rateLimiter = new RateLimiter(RATE_LIMIT_DELAY_MS);
 
@@ -54,10 +60,19 @@ export const Veo3FlowV2Plugin: VideoProvider = {
 
     const browserExe = process.env.BRAVE_PATH ?? process.env.CHROME_PATH ?? undefined;
 
-    logger.info('veo3_flow_v2: launching browser', { browserExe: browserExe ?? '(default)' });
+    // Persistent profile per account — first run user logs in manually,
+    // subsequent runs reuse the OAuth tokens + cookies from disk.
+    const userDataDir = path.join(PROFILES_DIR, `veo3-${account.id}`);
+    mkdirSync(userDataDir, { recursive: true });
+
+    logger.info('veo3_flow_v2: launching browser', {
+      browserExe: browserExe ?? '(default)',
+      userDataDir,
+    });
     await tm.launch({
       headless: false,
       chromeExecutablePath: browserExe,
+      userDataDir,
     });
 
     try {
@@ -118,12 +133,31 @@ export const Veo3FlowV2Plugin: VideoProvider = {
         );
       }
 
-      const videoUri = success.mediaMetadata?.video?.servingUri ?? success.mediaMetadata?.video?.uri;
-      if (!videoUri) throw new Error('veo3_flow_v2: no video URI in success response');
+      const mediaName = (success as any).name ?? (success as any).video?.operation?.name;
+      const successProjectId = (success as any).projectId ?? projectId;
+      const workflowId = (success as any).workflowId;
+      if (!mediaName || !successProjectId || !workflowId) {
+        throw new Error(
+          `veo3_flow_v2: missing identifiers (mediaName=${mediaName} projectId=${successProjectId} workflowId=${workflowId})`,
+        );
+      }
 
-      logger.info('veo3_flow_v2: downloading via CDP');
-      if (!tm._page || !tm._cdp) throw new Error('veo3_flow_v2: page/cdp not available');
-      const buffer = await downloadVideoViaCDP(tm._page, tm._cdp, videoUri);
+      logger.info('veo3_flow_v2: resolving signed CDN URL via editor page');
+      const videoUri = await client.getVideoUrl(mediaName, successProjectId, workflowId);
+
+      logger.info('veo3_flow_v2: downloading from signed URL via curl');
+      const { spawn } = await import('node:child_process');
+      const buffer: Buffer = await new Promise((resolveBuf, rejectBuf) => {
+        const chunks: Buffer[] = [];
+        const p = spawn('curl', ['-sSL', '--fail', videoUri], { stdio: ['ignore', 'pipe', 'pipe'] });
+        p.stdout.on('data', (c) => chunks.push(c));
+        let err = '';
+        p.stderr.on('data', (c) => (err += c.toString()));
+        p.on('close', (code) => {
+          if (code === 0) resolveBuf(Buffer.concat(chunks));
+          else rejectBuf(new Error(`curl exit ${code}: ${err}`));
+        });
+      });
       const uploadedUrl = await uploadFile(buffer, 'mp4');
 
       return {

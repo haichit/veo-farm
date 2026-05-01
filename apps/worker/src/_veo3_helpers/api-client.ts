@@ -184,6 +184,55 @@ export class ApiClient extends EventEmitter {
     throw new Error(`Video generation timed out after ${timeout / 1000}s`);
   }
 
+  /**
+   * Resolve the signed CDN URL for a generated video by navigating the editor page
+   * and intercepting the `flow-content.google/video/<name>?Expires=...&Signature=...`
+   * request via CDP. The resulting URL is self-contained (signed, no auth required) —
+   * download it with plain Node fetch.
+   */
+  async getVideoUrl(
+    mediaName: string,
+    projectId: string,
+    workflowId: string,
+    opts: { timeoutMs?: number } = {},
+  ): Promise<string> {
+    const timeout = opts.timeoutMs ?? 60_000;
+    const page = (this.tokenManager as any)._page;
+    const cdp = (this.tokenManager as any)._cdp;
+    if (!page || !cdp) throw new Error('getVideoUrl: no browser page/CDP available');
+
+    await cdp.send('Network.enable');
+    await cdp.send('Network.setCacheDisabled', { cacheDisabled: true });
+
+    let captured: string | null = null;
+    const handler = (ev: any) => {
+      const url: string = ev.response?.url ?? '';
+      if (
+        url.includes('flow-content.google/video/') &&
+        url.includes(mediaName) &&
+        !captured
+      ) {
+        captured = url;
+      }
+    };
+    cdp.on('Network.responseReceived', handler);
+
+    try {
+      const editorUrl = `${LABS_BASE}/fx/vi/tools/flow/project/${projectId}/edit/${workflowId}`;
+      await page.goto(editorUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+      const start = Date.now();
+      while (!captured && Date.now() - start < timeout) {
+        await sleep(500);
+      }
+    } finally {
+      cdp.off('Network.responseReceived', handler);
+      await cdp.send('Network.setCacheDisabled', { cacheDisabled: false }).catch(() => {});
+    }
+
+    if (!captured) throw new Error(`getVideoUrl: no signed URL captured within ${timeout}ms`);
+    return captured;
+  }
+
   async uploadImage(
     source: Buffer | string,
     mimeType = 'image/jpeg',
@@ -243,15 +292,161 @@ export class ApiClient extends EventEmitter {
 
   private async _ensureProject(): Promise<string> {
     if (this._projectId) return this._projectId;
-    const result = await this._labsRequest<any>(
-      'POST',
-      ENDPOINTS.labsCreateProject,
-      {},
-    );
-    const id = result.body?.result?.data?.id ?? result.body?.id;
-    if (!id) throw new Error('Failed to create Flow project');
-    this._projectId = id;
-    return id;
+
+    // Strategy 1: detect existing project from current Brave page URL.
+    const page = this.tokenManager._page;
+    if (page) {
+      const m = page.url().match(/\/project\/([a-f0-9-]{8,})/i);
+      if (m) {
+        this._projectId = m[1];
+        return this._projectId;
+      }
+    }
+
+    // Strategy 2: parse the Flow dashboard for an existing project anchor and navigate to it.
+    if (page) {
+      try {
+        await page.goto(`${LABS_BASE}/fx/vi/tools/flow`, { waitUntil: 'domcontentloaded' });
+        // Poll for anchors to mount — SPA renders project list async.
+        let existingId: string | null = null;
+        const startPoll = Date.now();
+        while (Date.now() - startPoll < 20_000 && !existingId) {
+          await new Promise((r) => setTimeout(r, 1000));
+          existingId = await page.evaluate(() => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const doc: any = (globalThis as any).document;
+            if (!doc) return null;
+            const html: string = doc.documentElement?.outerHTML ?? '';
+            const m = html.match(/\/project\/([a-f0-9-]{8,})/i);
+            return m ? m[1] : null;
+          });
+        }
+        if (existingId) {
+          this._projectId = existingId;
+          await page
+            .goto(`${LABS_BASE}/fx/vi/tools/flow/project/${existingId}`, {
+              waitUntil: 'domcontentloaded',
+            })
+            .catch(() => {});
+          return existingId;
+        }
+      } catch {
+        // fall through
+      }
+    }
+
+    // Strategy 3a: list existing projects via in-page fetch — pick first.
+    if (page) {
+      try {
+        const listUrls = [
+          '/fx/api/trpc/project.listProjects?batch=1&input=' +
+            encodeURIComponent(JSON.stringify({ '0': { json: {} } })),
+          '/fx/api/trpc/project.list?batch=1&input=' +
+            encodeURIComponent(JSON.stringify({ '0': { json: {} } })),
+          '/fx/api/trpc/project.getAll?batch=1&input=' +
+            encodeURIComponent(JSON.stringify({ '0': { json: {} } })),
+        ];
+        for (const url of listUrls) {
+          const result = await page.evaluate(async (u) => {
+            try {
+              const res = await fetch(u, { credentials: 'include' });
+              return { status: res.status, body: await res.text() };
+            } catch (e: any) {
+              return { status: 0, body: String(e?.message ?? e) };
+            }
+          }, url);
+          if (result.status >= 200 && result.status < 300) {
+            try {
+              const parsed: any = JSON.parse(result.body);
+              // tRPC batch response: [{ result: { data: { json: [...] } } }]
+              const items =
+                parsed?.[0]?.result?.data?.json ??
+                parsed?.result?.data?.json ??
+                parsed?.[0]?.result?.data ??
+                parsed?.result?.data ??
+                [];
+              const list = Array.isArray(items) ? items : items?.projects ?? items?.items ?? [];
+              const first = Array.isArray(list) && list[0];
+              const id = first?.id ?? first?.projectId;
+              if (id) {
+                this._projectId = id;
+                return id;
+              }
+            } catch {
+              // try next
+            }
+          }
+        }
+      } catch {
+        // fall through
+      }
+    }
+
+    // Strategy 3b: in-page fetch CREATE (uses page's own cookies + Origin auto).
+    if (page) {
+      try {
+        const probeUrls = [
+          ['/fx/api/trpc/project.createProject?batch=1', { '0': { json: {} } }],
+          ['/fx/api/trpc/project.createProject', { json: {} }],
+          ['/fx/api/trpc/project.createProject', {}],
+          ['/fx/api/trpc/project.create?batch=1', { '0': { json: {} } }],
+        ] as const;
+        for (const [url, body] of probeUrls) {
+          const result = await page.evaluate(
+            async (u, b) => {
+              try {
+                const res = await fetch(u, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(b),
+                  credentials: 'include',
+                });
+                const text = await res.text();
+                return { status: res.status, body: text };
+              } catch (e: any) {
+                return { status: 0, body: String(e?.message ?? e) };
+              }
+            },
+            url,
+            body,
+          );
+          if (result.status >= 200 && result.status < 300) {
+            try {
+              const parsed: any = JSON.parse(result.body);
+              const id =
+                parsed?.[0]?.result?.data?.json?.id ??
+                parsed?.result?.data?.json?.id ??
+                parsed?.result?.data?.id ??
+                parsed?.id;
+              if (id) {
+                this._projectId = id;
+                return id;
+              }
+            } catch {
+              // parse failed
+            }
+          }
+        }
+      } catch {
+        // fall through
+      }
+    }
+
+    // Final debug dump on failure.
+    if (page) {
+      try {
+        await page.screenshot({ path: '/tmp/flow-projectid-debug.png', fullPage: true });
+        const html = await page.content();
+        const fs = await import('node:fs');
+        fs.writeFileSync('/tmp/flow-projectid-debug.html', html);
+        const url = page.url();
+        const debugMsg = `URL=${url}, debug=/tmp/flow-projectid-debug.{png,html}`;
+        throw new Error(`Failed to obtain Flow projectId. ${debugMsg}`);
+      } catch (e) {
+        if (e instanceof Error && e.message.startsWith('Failed to obtain')) throw e;
+      }
+    }
+    throw new Error('Failed to obtain Flow projectId.');
   }
 
   private async _apiRequest<T = unknown>(
