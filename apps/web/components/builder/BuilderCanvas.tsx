@@ -85,10 +85,13 @@ export function BuilderCanvas() {
         maxZoom={2}
         proOptions={{ hideAttribution: true }}
         deleteKeyCode={['Backspace', 'Delete']}
-        panOnDrag={[1, 2]}
-        selectionOnDrag
         selectionKeyCode="Shift"
         multiSelectionKeyCode={['Meta', 'Control']}
+        nodesDraggable
+        nodesConnectable
+        elementsSelectable
+        panOnScroll={false}
+        zoomOnScroll
         className="builder-canvas"
       >
         <Background
