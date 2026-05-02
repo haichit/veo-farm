@@ -47,6 +47,12 @@ export function useWorkflowRun() {
           // value from a previous run after the user edited the textarea.
           if (n.type === 'prompt' && typeof cfg.text === 'string' && cfg.text.trim()) {
             cached.text = cfg.text;
+          } else if (n.type === 'prompt_list' && typeof cfg.text === 'string' && cfg.text.trim()) {
+            // prompt_list fan-out signal: emit textList AND text so
+            // downstream generate_image / generate_video knows to iterate.
+            const lines = cfg.text.split('\n').map((l: string) => l.trim()).filter(Boolean);
+            cached.textList = lines;
+            cached.text = cfg.text;
           } else if (typeof data?.lastOutputText === 'string' && data.lastOutputText.trim()) {
             cached.text = data.lastOutputText;
           }
