@@ -465,7 +465,10 @@ async function executeNode(node: FlowNode, inputs: Record<string, unknown>, job:
 // Drives sub_jobs and the parent jobs.stats counter so the Builder UI can be
 // exercised end-to-end before real plugin wiring lands. Generator nodes emit
 // a placeholder sample-video URL so the Album/preview overlays render.
-const STUB_GENERATOR_TYPES = new Set(['generate_image', 'generate_video', 'gemini_prompt', 'gemini_prompt_kie', 'merge_video']);
+// Node types that still fall back to a placeholder (real plugin wiring TBD).
+// generate_image + generate_video have real plugins now and short-circuit
+// before the stub branch in executeBuilderNode.
+const STUB_GENERATOR_TYPES = new Set(['gemini_prompt', 'gemini_prompt_kie', 'merge_video']);
 const STUB_PLACEHOLDER_VIDEO =
   'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
 const STUB_PLACEHOLDER_IMAGE =
@@ -601,6 +604,50 @@ function resolvePrompt(
   return cfg.text ?? cfg.prompt ?? '';
 }
 
+// Resolve image inputs for a generate_video node. Port indexes follow
+// dynamic-ports.ts:
+//   FRAME mode → input-1 = Start Frame, input-2 = End Frame
+//   REF mode   → input-1..N = ref images
+function resolveVideoRefs(
+  incoming: Array<{ source: string; targetHandle?: string }>,
+  outputs: Map<string, unknown>,
+  mode: string,
+): { startImageUrl?: string; endImageUrl?: string; referenceImageUrls?: string[] } {
+  function urlFromOutput(out: unknown): string | undefined {
+    if (!out || typeof out !== 'object') return undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const o = out as any;
+    if (typeof o.image === 'string') return o.image;
+    if (typeof o.imageUrl === 'string') return o.imageUrl;
+    if (Array.isArray(o.media)) {
+      const first = o.media.find(
+        (m: { url?: string; kind?: string }) => m?.url && m.kind !== 'video',
+      );
+      if (first?.url) return first.url;
+    }
+    return undefined;
+  }
+
+  if (mode.toUpperCase() === 'REF') {
+    const urls: string[] = [];
+    for (const e of incoming) {
+      if (!e.targetHandle || e.targetHandle === 'input-0') continue;
+      const u = urlFromOutput(outputs.get(e.source));
+      if (u) urls.push(u);
+    }
+    return { referenceImageUrls: urls };
+  }
+
+  // FRAME mode (default)
+  let startImageUrl: string | undefined;
+  let endImageUrl: string | undefined;
+  for (const e of incoming) {
+    if (e.targetHandle === 'input-1') startImageUrl = urlFromOutput(outputs.get(e.source));
+    else if (e.targetHandle === 'input-2') endImageUrl = urlFromOutput(outputs.get(e.source));
+  }
+  return { startImageUrl, endImageUrl };
+}
+
 async function executeBuilderNode(
   node: { id: string; type: string; data?: { config?: Record<string, unknown> } },
   incoming: Array<{ source: string; targetHandle?: string }>,
@@ -632,6 +679,27 @@ async function executeBuilderNode(
       jobId: job.id,
     });
     return { ...out, image: out.media[0]?.url };
+  }
+
+  if (node.type === 'generate_video') {
+    const { runGenerateVideoNode } = await import('../plugins/builder/generate-video.js');
+    const prompt = resolvePrompt(node, incoming, outputs);
+    const refs = resolveVideoRefs(incoming, outputs, (cfg.videoMode as string) ?? 'FRAME');
+    const out = await runGenerateVideoNode({
+      prompt,
+      config: {
+        ratio: cfg.ratio as string | undefined,
+        quantity: cfg.quantity as number | undefined,
+        quality: cfg.quality as string | undefined,
+        videoModel: cfg.videoModel as string | undefined,
+        videoMode: cfg.videoMode as string | undefined,
+        duration: cfg.duration as number | undefined,
+      },
+      refs,
+      userId: job.user_id,
+      jobId: job.id,
+    });
+    return { ...out, video: out.media[0]?.url };
   }
 
   if (node.type === 'download') {
