@@ -15,6 +15,7 @@ import {
 const DYNAMIC_PORT_NODES = new Set<BuilderNodeType>([
   'gemini_prompt',
   'gemini_prompt_kie',
+  'gemini_vision',
   'generate_image',
   'generate_video',
 ]);
