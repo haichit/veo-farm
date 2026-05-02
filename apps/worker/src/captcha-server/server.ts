@@ -291,9 +291,26 @@ const httpsServer = https.createServer(
 
   if (req.method === 'POST' && url.pathname === '/force-refresh') {
     let count = 0;
-    for (const { socket } of connectedClients.values()) {
-      socket.emit('server:reload-page', { delay: 500 });
-      count++;
+    for (const c of connectedClients.values()) {
+      if (c.socket) {
+        c.socket.emit('server:reload-page', { delay: 500 });
+        count++;
+      } else if (c.httpId) {
+        // For HTTP-polling clients, push a synthetic reload request
+        // through the same poll channel.
+        const reqId = `reload_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+        const item = { requestId: reqId, action: '__RELOAD__' };
+        if (c.httpPollResolve) {
+          const r = c.httpPollResolve;
+          c.httpPollResolve = undefined;
+          if (c.httpPollTimer) clearTimeout(c.httpPollTimer);
+          r(item);
+        } else {
+          c.httpPendingRequests = c.httpPendingRequests ?? [];
+          c.httpPendingRequests.push(item);
+        }
+        count++;
+      }
     }
     res.writeHead(200);
     res.end(JSON.stringify({ refreshed: count }));
