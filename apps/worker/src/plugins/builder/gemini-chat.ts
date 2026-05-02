@@ -228,6 +228,25 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
         logger.info({ clickedSel }, 'gemini_chat: plus button click result');
 
         if (!clickedSel) {
+          // Most likely cause: Gemini is in logged-out state (cookies stale)
+          // and the upload button doesn't exist on the unauthenticated page.
+          // Detect that explicitly and surface a useful error.
+          const loggedOut = await page.evaluate(() => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const doc: any = (globalThis as any).document;
+            const signInBtn =
+              doc.querySelector('[aria-label*="sign in" i]') ||
+              doc.querySelector('button.sign-in-button') ||
+              [...doc.querySelectorAll('a, button')].find((el: HTMLElement) =>
+                /\bsign in\b|\bđăng nhập\b/i.test(el.innerText || ''),
+              );
+            return !!signInBtn;
+          });
+          if (loggedOut) {
+            throw new Error(
+              'gemini_chat: Gemini chưa login (page có nút "Sign in"). Cookies hết hạn — vào /accounts cập nhật lại cookies cho account loại "gemini" hoặc "veo3", hoặc paste cookies mới vào field "Gemini Cookies" trong node.',
+            );
+          }
           // Dump current DOM so we can update selectors without re-running.
           try {
             const html = await page.content();
