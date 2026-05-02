@@ -1,6 +1,6 @@
 'use client';
 
-import type { NodeProps } from '@xyflow/react';
+import { NodeResizer, type NodeProps } from '@xyflow/react';
 import { Frame as FrameIcon, Play } from 'lucide-react';
 import { useFlowStore, type BuilderNodeData } from '@/lib/builder/flow-store';
 import { useWorkflowRun } from '@/lib/builder/use-workflow-run';
@@ -13,8 +13,11 @@ export function FrameNode(props: NodeProps) {
   const cfg = (data as BuilderNodeData)?.config as
     | { name?: string; width?: number; height?: number }
     | undefined;
-  const w = cfg?.width ?? 500;
-  const h = cfg?.height ?? 400;
+  // React Flow's NodeResizer writes the live size onto the node's
+  // top-level width/height props; fall back to the persisted config size
+  // for the very first render before any resize.
+  const w = (props.width as number | undefined) ?? cfg?.width ?? 500;
+  const h = (props.height as number | undefined) ?? cfg?.height ?? 400;
   const updateConfig = useFlowStore((s) => s.updateNodeConfig);
   const { startRun } = useWorkflowRun();
 
@@ -49,8 +52,30 @@ export function FrameNode(props: NodeProps) {
   return (
     <div
       className="relative pointer-events-none"
-      style={{ width: w, height: h }}
+      style={{ width: '100%', height: '100%', minWidth: 320, minHeight: 200 }}
     >
+      {/* Resize handles — pointer-events:auto override so user can grab the
+          corner/edges even though the frame body is otherwise click-through. */}
+      <div className="pointer-events-auto">
+        <NodeResizer
+          isVisible={selected}
+          minWidth={320}
+          minHeight={200}
+          handleStyle={{
+            width: 12,
+            height: 12,
+            borderRadius: 2,
+            background: 'rgb(245, 158, 11)',
+            border: '1px solid #1a1a2e',
+          }}
+          lineStyle={{ borderColor: 'rgba(245, 158, 11, 0.7)', borderWidth: 1 }}
+          onResizeEnd={(_e, params) => {
+            // Persist the new size into config so the next mount renders at
+            // the same size before NodeResizer re-syncs.
+            updateConfig(id, { width: params.width, height: params.height });
+          }}
+        />
+      </div>
       {/* Floating header bar above the frame — clickable */}
       <div
         className="absolute -top-[34px] left-0 right-0 h-[28px] flex items-center gap-2 px-3 rounded-md pointer-events-auto"
