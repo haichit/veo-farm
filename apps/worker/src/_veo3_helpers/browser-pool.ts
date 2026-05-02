@@ -204,8 +204,34 @@ async function ensureCaptchaClientConnected(
 
   logger.warn(
     { accountId },
-    'browser-pool: captcha-server has 0 clients, reloading labs.google to force extension reinject',
+    'browser-pool: captcha-server has 0 clients, warming cert + reloading labs.google',
   );
+
+  // Open a side-tab and visit captcha-server's /health so Brave accepts
+  // the self-signed cert for this profile session BEFORE labs.google
+  // tries to fetch from it. Without this, even with --ignore-certificate-errors
+  // the extension's socket.io polling fetch fails with xhr poll error.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const browser = (tm as any)._browser ?? page.browser();
+    const sidePage = await browser.newPage();
+    try {
+      await sidePage.goto(`${captchaUrl}/health`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 10_000,
+      });
+    } catch {
+      /* even an error response means cert was attempted; that's enough */
+    }
+    try { await sidePage.close(); } catch { /* ignore */ }
+  } catch (e) {
+    logger.warn(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      { accountId, err: (e as any)?.message ?? e },
+      'browser-pool: cert-warm side-tab failed (continuing)',
+    );
+  }
+
   try {
     await page.reload({ waitUntil: 'domcontentloaded', timeout: 60_000 });
   } catch (e) {

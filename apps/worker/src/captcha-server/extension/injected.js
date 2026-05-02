@@ -1,8 +1,12 @@
-// Injected into labs.google page context — has access to grecaptcha + makes Socket.IO connection.
-(async function () {
+// Injected into labs.google page context — has access to grecaptcha.
+// Listens for VEO_SOLVE_REQUEST postMessage from content script, runs
+// reCAPTCHA Enterprise, posts back VEO_CAPTCHA_RESULT with token or error.
+//
+// Connection to captcha-server lives in background.js (see background.js
+// for rationale).
+(function () {
   const TAG = '[Veo-Farm-Ext/Injected]';
   const RECAPTCHA_SITE_KEY = '6LdsFiUsAAAAAIjVDZcuLhaHiDn5nnHVXVRQGeMV';
-  const DEFAULT_SERVER = 'https://127.0.0.1:3456';
 
   const log = (...a) => console.log(TAG, ...a);
   const warn = (...a) => console.warn(TAG, '⚠️', ...a);
@@ -28,94 +32,28 @@
     return token;
   }
 
-  function getSettings() {
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => resolve({ serverUrl: DEFAULT_SERVER }), 500);
-      const handler = (evt) => {
-        if (evt.source !== window || evt.data?.type !== 'VEO_GET_SETTINGS_RESPONSE') return;
-        clearTimeout(timer);
-        window.removeEventListener('message', handler);
-        resolve(evt.data.settings || {});
-      };
-      window.addEventListener('message', handler);
-      window.postMessage({ type: 'VEO_GET_SETTINGS_REQUEST' }, '*');
-    });
-  }
-
-  try {
-    const settings = await getSettings();
-    const serverUrl = settings.serverUrl ?? DEFAULT_SERVER;
-    log('Server URL:', serverUrl);
-
-    if (typeof window.io !== 'function') {
-      err('socket.io client not loaded — extension files missing socket.io.min.js');
-      return;
+  window.addEventListener('message', async (evt) => {
+    if (evt.source !== window) return;
+    if (evt.data?.type !== 'VEO_SOLVE_REQUEST') return;
+    const { requestId, action } = evt.data;
+    try {
+      await waitForGrecaptcha();
+      const token = await solveRecaptcha(action || 'IMAGE_GENERATION');
+      window.postMessage({ type: 'VEO_CAPTCHA_RESULT', requestId, token }, '*');
+    } catch (e) {
+      const msg = e?.message || String(e);
+      err('Solve failed:', msg);
+      window.postMessage({ type: 'VEO_CAPTCHA_RESULT', requestId, error: msg }, '*');
     }
+  });
 
-    const socket = window.io(serverUrl, {
-      // Polling first — WebSocket to self-signed-cert localhost can fail in fresh
-      // profiles even with --ignore-certificate-errors. Polling uses HTTPS fetch
-      // which respects the flag and works reliably.
-      transports: ['polling', 'websocket'],
-      upgrade: true,
-      reconnection: true,
-      reconnectionDelay: 2000,
-      reconnectionAttempts: Infinity,
-      rejectUnauthorized: false,
-      secure: true,
-    });
+  // Pre-warm grecaptcha so first solve is fast.
+  waitForGrecaptcha().catch((e) => warn('Initial wait:', e.message));
 
-    socket.on('connect', () => {
-      log('✅ Connected (id=' + socket.id + ')');
-      const ua = navigator.userAgent || '';
-      const isHeadless = navigator.webdriver === true || ua.includes('HeadlessChrome');
-      const browserType = isHeadless ? 'brave' : 'chrome';
-      socket.emit('client:ready', {
-        timestamp: new Date().toISOString(),
-        browserType,
-      });
-    });
-
-    socket.on('disconnect', (reason) => warn('Disconnected:', reason));
-    socket.on('connect_error', (e) => warn('Connection error:', e.message));
-
-    socket.on('server:request-captcha', async ({ requestId, action }) => {
-      log('Captcha request:', action);
-      try {
-        await waitForGrecaptcha();
-        const token = await solveRecaptcha(action || 'IMAGE_GENERATION');
-        socket.emit('client:captcha-solved', {
-          requestId,
-          token,
-          timestamp: new Date().toISOString(),
-        });
-      } catch (e) {
-        const msg = e?.message || String(e);
-        err('Solve failed:', msg);
-        socket.emit('client:captcha-error', { requestId, error: msg });
-      }
-    });
-
-    socket.on('server:reload-page', ({ delay = 0 }) => {
-      warn('Server requested page reload');
-      try {
-        localStorage.removeItem('_grecaptcha');
-      } catch {}
-      if (delay > 0) setTimeout(() => location.reload(), delay);
-      else location.reload();
-    });
-
-    // Initial wait so the reCAPTCHA library is preloaded.
-    await waitForGrecaptcha().catch((e) => warn('Initial wait:', e.message));
-
-    // Expose for manual debugging.
-    window.veoFarmCaptcha = {
-      socket,
-      solve: () => solveRecaptcha(),
-      reload: () => location.reload(),
-    };
-    log('✅ Captcha solver ready');
-  } catch (e) {
-    err('Init failed:', e.message);
-  }
+  // Expose for manual debugging.
+  window.veoFarmCaptcha = {
+    solve: () => solveRecaptcha(),
+    reload: () => location.reload(),
+  };
+  log('✅ Captcha solver ready');
 })();

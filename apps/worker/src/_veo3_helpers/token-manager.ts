@@ -60,13 +60,14 @@ export class TokenManager {
       // labs.google → 127.0.0.1:3456 fetch from extension's page-context
       // socket.io even with CORS+self-signed-trust. Disabling lets the
       // extension's WebSocket handshake actually reach captcha-server.
-      '--disable-features=IsolateOrigins,site-per-process,BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights,PrivateNetworkAccessRespectPreflightResults',
+      '--disable-features=IsolateOrigins,site-per-process,BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights,PrivateNetworkAccessRespectPreflightResults,LocalNetworkAccessChecks,LocalNetworkAccess,PrivateNetworkAccessForWorkers,PrivateNetworkAccessForWorkersWarningOnly,PrivateNetworkAccessForNavigations,PrivateNetworkAccessForNavigationsWarningOnly,BraveShields,BraveAdblockCnameUncloaking,BraveAdblockCosmeticFiltering,BraveAdblockCollapseBlockedElements,BraveAdblockCookieListDefault,BraveAdblockMobileNotificationsListDefault,BraveAdblockExperimentalListDefault,HttpsByDefault',
       `--load-extension=${extPath}`,
       `--disable-extensions-except=${extPath}`,
       // Trust captcha-server's self-signed cert so extension can WS to https://127.0.0.1:3456.
       '--ignore-certificate-errors',
       '--allow-insecure-localhost',
       '--allow-running-insecure-content',
+      '--unsafely-treat-insecure-origin-as-secure=https://127.0.0.1:3456,https://localhost:3456',
     ];
 
     const launchOpts: any = {
@@ -83,6 +84,13 @@ export class TokenManager {
     // crashed previous run. browser.close() can leave subprocesses alive on macOS.
     if (opts.userDataDir) {
       await killStaleProfileProcesses(opts.userDataDir);
+      // Patch the profile's Preferences to disable Brave Shields globally.
+      // Brave's adblock + tracker-blocker engine returns
+      // net::ERR_BLOCKED_BY_CLIENT for cross-origin loopback fetches even
+      // when all PNA / cert flags are off, killing socket.io polling from
+      // labs.google → 127.0.0.1:3456. Setting brave_shields default to
+      // "allow" (1) bypasses the block engine for this profile.
+      await disableBraveShieldsForProfile(opts.userDataDir);
     }
 
     // Retry launch with backoff in case the OS hasn't fully released the lock yet.
@@ -315,4 +323,61 @@ async function killStaleProfileProcesses(userDataDir: string): Promise<void> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Patch the Brave profile's Preferences.json to globally disable Shields.
+ * Brave's adblock engine returns ERR_BLOCKED_BY_CLIENT for cross-origin
+ * loopback fetches (labs.google → 127.0.0.1:3456) regardless of PNA flags.
+ * Setting brave_shields content_setting to ALLOW (1) bypasses the block.
+ *
+ * Safe to call on a non-existent profile dir — the file is created on
+ * Brave's first launch, so we ensure the dir exists and write a minimal
+ * Preferences with the shield flag pre-set.
+ */
+async function disableBraveShieldsForProfile(userDataDir: string): Promise<void> {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const defaultDir = path.join(userDataDir, 'Default');
+  if (!fs.existsSync(defaultDir)) {
+    fs.mkdirSync(defaultDir, { recursive: true });
+  }
+  const prefsPath = path.join(defaultDir, 'Preferences');
+  let prefs: any = {};
+  if (fs.existsSync(prefsPath)) {
+    try {
+      prefs = JSON.parse(fs.readFileSync(prefsPath, 'utf8'));
+    } catch {
+      prefs = {};
+    }
+  }
+  // Deep-merge shield-disabled values.
+  // Brave 1.83+ uses CamelCase keys for shields-related exceptions
+  // (braveShields, shieldsAds, shieldsCookiesV3, trackers) and snake_case
+  // for chromium content settings (local_network, loopback_network,
+  // local_network_access, mixed_script). Set ALLOW (1) on the shield + the
+  // loopback network gates for ALL origins (`*,*`) so cross-origin fetches
+  // from labs.google → 127.0.0.1:3456 aren't blocked.
+  prefs.profile = prefs.profile ?? {};
+  prefs.profile.content_settings = prefs.profile.content_settings ?? {};
+  prefs.profile.content_settings.exceptions = {
+    ...(prefs.profile.content_settings.exceptions ?? {}),
+    braveShields: { '*,*': { setting: 1 } },
+    shieldsAds: { '*,*': { setting: 1 } },
+    shieldsCookiesV3: { '*,*': { setting: 1 } },
+    trackers: { '*,*': { setting: 1 } },
+    cosmeticFilteringV2: { '*,*': { setting: 1 } },
+    fingerprintingV2: { '*,*': { setting: 1 } },
+    httpUpgradableResources: { '*,*': { setting: 1 } },
+    httpsUpgrades: { '*,*': { setting: 1 } },
+    https_enforced: { '*,*': { setting: 1 } },
+    local_network: { '*,*': { setting: 1 } },
+    local_network_access: { '*,*': { setting: 1 } },
+    loopback_network: { '*,*': { setting: 1 } },
+    mixed_script: { '*,*': { setting: 1 } },
+    subresource_filter: { '*,*': { setting: 1 } },
+  };
+  prefs.brave = prefs.brave ?? {};
+  prefs.brave.shields_settings_version = 5;
+  fs.writeFileSync(prefsPath, JSON.stringify(prefs));
 }
