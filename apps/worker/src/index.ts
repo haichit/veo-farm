@@ -5,6 +5,8 @@ import { logger } from './core/logger.js';
 import { supabase } from './core/supabase.js';
 import { runJob } from './core/job-runner.js';
 import { shutdownBrowser } from './core/playwright-pool.js';
+import { prewarm, shutdownBrowserPool } from './_veo3_helpers/browser-pool.js';
+import { decryptCookies } from './core/account-pool.js';
 
 const POLL_INTERVAL = Number(process.env.WORKER_POLL_INTERVAL_MS ?? 3000);
 const HEARTBEAT_INTERVAL = Number(process.env.WORKER_HEARTBEAT_MS ?? 10_000);
@@ -106,6 +108,53 @@ async function heartbeat() {
   }
 }
 
+// Pull idle veo3 accounts from the DB and warm the browser pool with them.
+// Stops at PREWARM_MAX (default 1) so we don't boot ten browsers on a
+// dev laptop. Service-role client bypasses RLS so a worker process — which
+// has no auth context — can still see the rows.
+async function prewarmVeo3Accounts(): Promise<void> {
+  const max = Number(process.env.PREWARM_MAX ?? 1);
+  if (max <= 0) return;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await supabase()
+    .from('accounts')
+    .select('*')
+    .eq('provider_id', 'veo3')
+    .eq('status', 'idle')
+    .order('last_used_at', { ascending: true, nullsFirst: true })
+    .limit(max);
+  if (error) {
+    logger.warn({ err: error.message }, 'prewarm: failed to query accounts');
+    return;
+  }
+  if (!data || data.length === 0) {
+    logger.info('prewarm: no idle veo3 accounts to warm');
+    return;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const targets = data.map((a: any) => {
+    const cookies = decryptCookies(a);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const meta = (a.meta ?? {}) as Record<string, any>;
+    return {
+      id: a.id as string,
+      email: (a.label as string) ?? a.id,
+      cookies: cookies.map((c) => ({
+        name: c.name,
+        value: c.value,
+        domain: c.domain,
+        path: c.path,
+        expires: typeof c.expires === 'number' ? c.expires : undefined,
+        httpOnly: c.httpOnly,
+        secure: c.secure,
+        sameSite: c.sameSite,
+      })),
+      projectId: meta.projectId as string | undefined,
+    };
+  });
+  await prewarm(targets);
+}
+
 async function main() {
   logger.info({ poll_ms: POLL_INTERVAL, worker_id: WORKER_ID }, 'worker starting');
 
@@ -118,8 +167,24 @@ async function main() {
   await heartbeat();
   setInterval(heartbeat, HEARTBEAT_INTERVAL);
 
+  // Pre-warm the browser pool for veo3 accounts — first user-triggered job
+  // hits a warm slot instead of paying ~60s cold-start. Disabled with
+  // PREWARM_BROWSERS=0 (e.g. CI / local dev where the user wants fast restarts).
+  if (process.env.PREWARM_BROWSERS !== '0') {
+    void prewarmVeo3Accounts().catch((e) =>
+      logger.warn({ err: e?.message ?? e }, 'prewarm task failed'),
+    );
+  }
+
   process.on('SIGTERM', async () => {
     logger.info('SIGTERM received, shutting down');
+    await shutdownBrowserPool().catch(() => {});
+    await shutdownBrowser();
+    process.exit(0);
+  });
+  process.on('SIGINT', async () => {
+    logger.info('SIGINT received, shutting down');
+    await shutdownBrowserPool().catch(() => {});
     await shutdownBrowser();
     process.exit(0);
   });

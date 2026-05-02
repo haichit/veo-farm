@@ -2,13 +2,14 @@
 // Real implementation that drives flow.google through the Sprint 7B cookies
 // pool (same auth path as Veo3 video). Returns N image URLs hosted on
 // Supabase Storage so the browser doesn't have to hit Google CDN directly.
+//
+// Browser is reused across calls via the browser-pool — first job per
+// account pays the cold start, subsequent jobs reuse the warm browser
+// (saves ~55s/job).
 
-import path from 'node:path';
-import { homedir } from 'node:os';
-import { mkdirSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { ApiClient } from '../../_veo3_helpers/api-client.js';
-import { TokenManager } from '../../_veo3_helpers/token-manager.js';
+import { acquireTokenManager, dropTokenManager } from '../../_veo3_helpers/browser-pool.js';
 import { claimAccount, releaseAccount, decryptCookies } from '../../core/account-pool.js';
 import { uploadBuffer } from '../../core/storage.js';
 import { logger } from '../../core/logger.js';
@@ -18,9 +19,6 @@ import {
   RATE_LIMIT_DELAY_MS,
 } from '../../_veo3_helpers/constants.js';
 import { RateLimiter } from '../../core/concurrency.js';
-
-const PROFILES_DIR =
-  process.env.WORKER_PROFILES_DIR ?? path.join(homedir(), '.veo-farm-profiles');
 
 // One in-flight generation at a time per worker process — prevents flow.google
 // from rate-limiting our cookies pool.
@@ -102,28 +100,20 @@ export async function runGenerateImageNode(
     sameSite: c.sameSite,
   }));
 
-  const tm = new TokenManager(
-    {
-      accountId: account.id,
-      email: account.label,
-      cookies: puppeteerCookies,
-      projectId,
-    },
-    process.env.CAPTCHA_SERVER_URL ?? 'http://127.0.0.1:3456',
-  );
-
-  const browserExe = process.env.BRAVE_PATH ?? process.env.CHROME_PATH ?? undefined;
-  const userDataDir = path.join(PROFILES_DIR, `veo3-${account.id}`);
-  mkdirSync(userDataDir, { recursive: true });
-
   logger.info(
     { accountId: account.id, prompt: input.prompt.slice(0, 80) },
-    'generate_image: launching browser',
+    'generate_image: acquiring browser',
   );
-  await tm.launch({ headless: false, chromeExecutablePath: browserExe, userDataDir });
+  const lease = await acquireTokenManager({
+    accountId: account.id,
+    email: account.label,
+    cookies: puppeteerCookies,
+    projectId,
+  });
 
+  let leaseHeld = true;
   try {
-    const client = new ApiClient(tm, {
+    const client = new ApiClient(lease.tm, {
       paygateTier: 'PAYGATE_TIER_TWO',
       projectId: projectId ?? null,
     });
@@ -156,8 +146,17 @@ export async function runGenerateImageNode(
 
     logger.info({ count: uploaded.length }, 'generate_image: complete');
     return { media: uploaded };
+  } catch (err) {
+    // Browser may be in a bad state — release the lease then drop the slot
+    // entirely so the next call cold-starts.
+    if (leaseHeld) {
+      lease.release();
+      leaseHeld = false;
+    }
+    await dropTokenManager(account.id);
+    throw err;
   } finally {
-    await tm.close();
+    if (leaseHeld) lease.release();
     await releaseAccount(account.id, 0, 'idle');
   }
 }
