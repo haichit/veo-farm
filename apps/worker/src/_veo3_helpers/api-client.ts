@@ -784,8 +784,14 @@ export class ApiClient extends EventEmitter {
     if (res.statusCode >= 200 && res.statusCode < 300) {
       return { status: res.statusCode, headers: res.headers, body: parsed as T };
     }
+    // Surface enough of the body in the error message that callers (and the
+    // node-error display in the UI) can see what Google actually rejected.
+    const bodySnippet =
+      typeof parsed === 'object' && parsed
+        ? JSON.stringify(parsed).slice(0, 400)
+        : String(parsed ?? '').slice(0, 400);
     throw new ApiError(
-      `API ${res.statusCode} ${method} ${new URL(url).pathname}`,
+      `API ${res.statusCode} ${method} ${new URL(url).pathname} — ${bodySnippet}`,
       res.statusCode,
       parsed,
     );
