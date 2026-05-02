@@ -8,8 +8,12 @@ import { useFlowStore, type NodeStatus, type PreviewMedia } from './flow-store';
 // into the flow store. Mounted by the canvas page when currentJobId !== null.
 //
 // Channel listens to:
-//   - sub_jobs UPDATE  → per-node status + previewMedia
-//   - jobs UPDATE      → aggregated stats + run state transitions
+//   - sub_jobs UPDATE/INSERT  → per-node status + previewMedia
+//   - jobs UPDATE             → aggregated stats + run state transitions
+//
+// Also runs an initial SELECT pass so any rows the worker wrote between job
+// creation and the subscription becoming active aren't missed (Realtime only
+// streams events after .subscribe() resolves).
 export function useJobSubscription(jobId: string | null) {
   const updateNodeStatus = useFlowStore((s) => s.updateNodeStatus);
   const setNodePreview = useFlowStore((s) => s.setNodePreview);
@@ -19,20 +23,56 @@ export function useJobSubscription(jobId: string | null) {
   useEffect(() => {
     if (!jobId) return;
     const sb = createSupabaseBrowserClient();
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    let cancelled = false;
+
+    function applySubJob(row: {
+      node_id?: string;
+      status?: string;
+      error?: string | null;
+      output?: unknown;
+    }) {
+      if (!row?.node_id) return;
+      updateNodeStatus(row.node_id, normaliseStatus(row.status), {
+        error: row.error ?? undefined,
+      });
+      const media = extractMedia(row.output);
+      if (media.length > 0) setNodePreview(row.node_id, media);
+    }
+
+    function applyJob(row: { status?: string; stats?: { done: number; wait: number; err: number } }) {
+      if (row?.stats) setStats(row.stats);
+      if (row?.status === 'completed') setRunState('idle');
+      else if (row?.status === 'failed') setRunState('idle');
+      else if (row?.status === 'cancelled') setRunState('stopped');
+      else if (row?.status === 'paused') setRunState('paused');
+      else if (row?.status === 'running') setRunState('running');
+    }
+
+    async function pollOnce() {
+      const [{ data: subRows }, { data: jobRow }] = await Promise.all([
+        sb.from('sub_jobs').select('node_id, status, error, output').eq('job_id', jobId),
+        sb.from('jobs').select('status, stats').eq('id', jobId).single(),
+      ]);
+      if (cancelled) return;
+      // eslint-disable-next-line
+      if (subRows) for (const r of subRows) applySubJob(r as any);
+      // eslint-disable-next-line
+      if (jobRow) applyJob(jobRow as any);
+    }
+
+    // Pull current state straight away so completed runs reflect even if
+    // Realtime hasn't acknowledged the subscription yet.
+    void pollOnce();
+
     const channel = sb
       .channel(`job:${jobId}`)
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'sub_jobs', filter: `job_id=eq.${jobId}` },
+        { event: '*', schema: 'public', table: 'sub_jobs', filter: `job_id=eq.${jobId}` },
         (payload) => {
           // eslint-disable-next-line
-          const row = payload.new as any;
-          if (!row?.node_id) return;
-          updateNodeStatus(row.node_id, normaliseStatus(row.status), {
-            error: row.error ?? undefined,
-          });
-          const media = extractMedia(row.output);
-          if (media.length > 0) setNodePreview(row.node_id, media);
+          applySubJob(payload.new as any);
         },
       )
       .on(
@@ -40,18 +80,23 @@ export function useJobSubscription(jobId: string | null) {
         { event: 'UPDATE', schema: 'public', table: 'jobs', filter: `id=eq.${jobId}` },
         (payload) => {
           // eslint-disable-next-line
-          const row = payload.new as any;
-          if (row?.stats) setStats(row.stats);
-          if (row?.status === 'completed') setRunState('idle');
-          else if (row?.status === 'failed') setRunState('idle');
-          else if (row?.status === 'cancelled') setRunState('stopped');
-          else if (row?.status === 'paused') setRunState('paused');
-          else if (row?.status === 'running') setRunState('running');
+          applyJob(payload.new as any);
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        // Fallback poll: if Realtime never connects (CORS / publication
+        // missing / network), poll every 1.5s until job leaves "running".
+        if (status !== 'SUBSCRIBED' && !pollTimer) {
+          pollTimer = setInterval(() => void pollOnce(), 1500);
+        } else if (status === 'SUBSCRIBED' && pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+      });
 
     return () => {
+      cancelled = true;
+      if (pollTimer) clearInterval(pollTimer);
       void sb.removeChannel(channel);
     };
   }, [jobId, updateNodeStatus, setNodePreview, setStats, setRunState]);
