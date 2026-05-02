@@ -130,14 +130,35 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
       }
     }
 
-    // Skip re-navigation if we're already on gemini.google.com from a
-    // prior call — saves ~3-5s of page load on every subsequent run.
+    // Always force a fresh chat — reusing the tab keeps the prior turn
+    // in the conversation context, which causes the next prompt to be
+    // interpreted relative to old questions ("describe media" turns into
+    // a follow-up about the same nonexistent media). Clicking "New chat"
+    // is fast (~200ms) when the tab is already loaded.
     const currentUrl = page.url();
     if (!/^https:\/\/gemini\.google\.com\//.test(currentUrl)) {
       logger.info('gemini_chat: navigate to gemini.google.com');
       await page.goto(GEMINI_URL, { waitUntil: 'domcontentloaded', timeout: 90_000 });
     } else {
-      logger.info('gemini_chat: already on gemini.google.com, reusing tab');
+      logger.info('gemini_chat: reusing tab — starting new chat');
+      // Try clicking the "New chat" / "Cuộc trò chuyện mới" button.
+      const newChatSel =
+        'button[aria-label*="new chat" i], button[aria-label*="cuộc trò chuyện mới" i], button[aria-label*="trò chuyện mới" i], button[data-test-id="new-chat-button"], a[href$="/app"]';
+      try {
+        await page.evaluate((sel: string) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const doc: any = (globalThis as any).document;
+          const btn = doc.querySelector(sel);
+          if (btn) (btn as HTMLElement).click();
+        }, newChatSel);
+        await new Promise((r) => setTimeout(r, 400));
+      } catch {
+        /* fall through to forced reload */
+      }
+      // If the URL still has a chat id (/app/<id>), force-navigate to /app.
+      if (/\/app\/[a-z0-9-]{6,}/.test(page.url())) {
+        await page.goto(GEMINI_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+      }
     }
 
     // Detect login redirect — surface a clear error so the user knows to
@@ -217,34 +238,126 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
       const el = all[all.length - 1] ?? all[0];
       if (!el) return false;
       el.focus();
-      // Path 1: clipboard paste — most reliable for contenteditable + IME.
+
+      // Read final text out of the DOM after insertion to verify.
+      const readBack = (): string => {
+        if ('value' in el && typeof el.value === 'string') return el.value;
+        return (el.innerText ?? el.textContent ?? '').replace(/​/g, '');
+      };
+
+      // Path 1: synthesize a real ClipboardEvent('paste') with DataTransfer.
+      // Most contenteditable handlers (Angular/Lit/Quill — Gemini uses one)
+      // listen for 'paste' and consume the whole text atomically. This is
+      // how real Cmd+V works and avoids any per-char IME race.
+      try {
+        const dt = new win.DataTransfer();
+        dt.setData('text/plain', text);
+        const evt = new win.ClipboardEvent('paste', {
+          clipboardData: dt,
+          bubbles: true,
+          cancelable: true,
+        });
+        el.dispatchEvent(evt);
+        // Give Gemini a tick to commit the paste into the editor model.
+        await new Promise((r) => setTimeout(r, 50));
+        if (readBack().trim().length >= text.trim().length) return true;
+      } catch {
+        /* fall through */
+      }
+
+      // Path 2: clipboard.writeText + execCommand('paste').
       try {
         await win.navigator.clipboard.writeText(text);
         const ok = doc.execCommand('paste');
-        if (ok) return true;
+        await new Promise((r) => setTimeout(r, 50));
+        if (ok && readBack().trim().length >= text.trim().length) return true;
       } catch {
         /* fall through */
       }
-      // Path 2: insertText — works for both <textarea> and contenteditable.
+
+      // Path 3: execCommand('insertText') — last resort.
       try {
-        const ok = doc.execCommand('insertText', false, text);
-        if (ok) return true;
+        doc.execCommand('insertText', false, text);
+        await new Promise((r) => setTimeout(r, 50));
+        if (readBack().trim().length >= text.trim().length) return true;
       } catch {
         /* fall through */
       }
-      // Path 3: brute-force assignment + input event.
+
+      // Path 4: direct assignment (textarea only) — definitely loses
+      // contenteditable framework state but at least gets full text in.
       if ('value' in el) {
         el.value = text;
-      } else {
-        el.textContent = text;
+        el.dispatchEvent(new win.Event('input', { bubbles: true }));
+        return true;
       }
-      el.dispatchEvent(new win.Event('input', { bubbles: true }));
+      // Path 5: contenteditable manual node injection.
+      const range = doc.createRange();
+      el.innerHTML = '';
+      const p = doc.createElement('p');
+      p.textContent = text;
+      el.appendChild(p);
+      range.selectNodeContents(el);
+      range.collapse(false);
+      const sel = win.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+      el.dispatchEvent(new win.InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
       return true;
     }, userPrompt, inputSel);
 
     if (!inserted) throw new Error('gemini_chat: failed to insert prompt into chat input');
     // Tiny settle so Gemini registers the input event before Enter.
     await new Promise((r) => setTimeout(r, 200));
+
+    // Verify the chat input actually contains our full prompt before pressing
+    // Enter. If chars were dropped, abort with a useful error rather than
+    // sending a corrupted question and getting a confused response.
+    const actualPrompt = await page.evaluate((selector: string) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const doc: any = (globalThis as any).document;
+      const all = doc.querySelectorAll(selector);
+      const el = all[all.length - 1] ?? all[0];
+      if (!el) return '';
+      if ('value' in el && typeof el.value === 'string') return el.value;
+      // eslint-disable-next-line no-irregular-whitespace
+      return (el.innerText ?? el.textContent ?? '').replace(/​/g, '').trim();
+    }, inputSel);
+    const expected = userPrompt.trim();
+    if (actualPrompt.trim() !== expected) {
+      logger.warn(
+        { expectedLen: expected.length, actualLen: actualPrompt.length, expectedHead: expected.slice(0, 40), actualHead: actualPrompt.slice(0, 40) },
+        'gemini_chat: prompt round-trip mismatch — retrying with fallback paste',
+      );
+      // Force-clear and retry via direct DOM injection (path 5 in inserter).
+      await page.evaluate((text: string, selector: string) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const doc: any = (globalThis as any).document;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const win: any = (globalThis as any).window;
+        const all = doc.querySelectorAll(selector);
+        const el = all[all.length - 1] ?? all[0];
+        if (!el) return;
+        el.focus();
+        if ('value' in el) {
+          el.value = '';
+          el.value = text;
+        } else {
+          el.innerHTML = '';
+          const p = doc.createElement('p');
+          p.textContent = text;
+          el.appendChild(p);
+          const range = doc.createRange();
+          range.selectNodeContents(el);
+          range.collapse(false);
+          const sel = win.getSelection();
+          sel?.removeAllRanges();
+          sel?.addRange(range);
+        }
+        el.dispatchEvent(new win.InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+      }, userPrompt, inputSel);
+      await new Promise((r) => setTimeout(r, 300));
+    }
 
     // ─── Send ───
     logger.info('gemini_chat: sending');
