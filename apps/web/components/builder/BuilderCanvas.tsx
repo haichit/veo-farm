@@ -194,8 +194,10 @@ export function BuilderCanvas() {
         return cx >= fx && cx <= fx + fw && cy >= fy && cy <= fy + fh;
       });
       const newParent = containing ? containing.id : null;
+      // Read membership from our own data.frameId field — RF's parentId
+      // isn't used anymore so node.parentId is always undefined.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const oldParent = (node.parentId as string | undefined) ?? null;
+      const oldParent = ((node.data as any)?.frameId as string | undefined) ?? null;
       if (newParent !== oldParent) setNodeParent(node.id, newParent);
     },
     [setNodeParent],
