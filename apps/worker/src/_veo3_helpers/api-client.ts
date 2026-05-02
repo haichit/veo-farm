@@ -675,17 +675,25 @@ export class ApiClient extends EventEmitter {
         if (POLICY_KEYWORDS.some((k) => bodyStr.includes(k))) {
           throw new Error(`POLICY_VIOLATION: ${bodyStr.substring(0, 500)}`);
         }
-        if (
-          status === 403 &&
-          bodyStr.includes('PUBLIC_ERROR_UNUSUAL_ACTIVITY') &&
-          attempt < RETRY_MAX
-        ) {
+        // 403 with re-solvable cause: rotate recaptcha session, fetch a
+        // fresh token, retry. Covers UNUSUAL_ACTIVITY *and* generic
+        // "reCAPTCHA evaluation failed" / PERMISSION_DENIED from Google's
+        // verifier — both mean the previous token was rejected and a new
+        // one needs to be minted from a freshened session.
+        const isRecaptchaReject =
+          bodyStr.includes('PUBLIC_ERROR_UNUSUAL_ACTIVITY') ||
+          bodyStr.includes('reCAPTCHA evaluation failed') ||
+          (bodyStr.includes('reCAPTCHA') && bodyStr.includes('PERMISSION_DENIED'));
+        if (status === 403 && isRecaptchaReject && attempt < RETRY_MAX) {
           await this.tokenManager._rotateRecaptchaSession?.('UNUSUAL_ACTIVITY');
           if (body?.clientContext?.recaptchaContext) {
             body.clientContext.recaptchaContext.token = await this.tokenManager.getRecaptchaToken(
               recaptchaAction,
             );
           }
+          // Brief pause to let the freshly-minted session settle on Google's
+          // side before retrying.
+          await sleep(2000 * attempt);
           continue;
         }
         if (status === 429 && attempt < RETRY_MAX) {
