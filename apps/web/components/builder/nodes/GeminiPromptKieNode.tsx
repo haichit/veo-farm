@@ -15,7 +15,7 @@ export function GeminiPromptKieNode(props: NodeProps) {
   const hasApiKey = !!cfg.apiKey;
 
   return (
-    <BaseNode {...props} runIcon="sparkles">
+    <BaseNode {...props} runIcon="play">
       <textarea
         value={cfg.promptTemplate ?? ''}
         onChange={(e) => updateConfig(props.id, { promptTemplate: e.target.value })}

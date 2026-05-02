@@ -1,7 +1,7 @@
 'use client';
 
 import * as Icons from 'lucide-react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react';
 import { Loader2, CheckCircle2, AlertCircle, Info, Download, Play, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
@@ -92,16 +92,38 @@ export function BaseNode(props: BaseNodeProps) {
           ? { boxShadow: '0 0 20px rgba(239,68,68,0.2)' }
           : undefined;
 
+  // Frame node has its own resize UX inside its component — don't double-resize.
+  const isFrame = type === 'frame';
+
   return (
     <div
       className={`relative bg-[#1a1a2e] rounded-[10px] transition-all ${borderClass}`}
       style={{
-        width: def.width,
+        width: '100%',
+        height: '100%',
+        minWidth: def.width,
         minHeight: def.minHeight,
         ...shadowStyle,
         ...(selected ? { borderColor: def.color } : {}),
       }}
     >
+      {/* Resize handle bottom-right corner — drag to enlarge for long prompts. */}
+      {!isFrame && (
+        <NodeResizer
+          isVisible={selected}
+          minWidth={def.width}
+          minHeight={def.minHeight}
+          handleStyle={{
+            width: 10,
+            height: 10,
+            borderRadius: 2,
+            background: def.color,
+            border: '1px solid #1a1a2e',
+          }}
+          lineStyle={{ borderColor: `${def.color}60` }}
+        />
+      )}
+
       {/* Input handles (dynamic) */}
       {dynamicInputs.map((port, i) => (
         <Handle
@@ -207,14 +229,14 @@ export function BaseNode(props: BaseNodeProps) {
                 if (!runDisabled) effectiveRun();
               }}
               onMouseDown={(e) => e.stopPropagation()}
-              className={`nodrag w-[22px] h-[22px] flex items-center justify-center rounded transition-colors ${
+              className={`nodrag w-[24px] h-[22px] flex items-center justify-center rounded font-semibold transition-all ${
                 runDisabled
-                  ? 'text-[#444] cursor-not-allowed'
+                  ? 'bg-white/[0.04] text-[#555] cursor-not-allowed'
                   : runIcon === 'sparkles'
-                    ? 'text-[#84cc16] hover:bg-[#84cc16]/10'
+                    ? 'bg-[#84cc16]/20 text-[#84cc16] hover:bg-[#84cc16]/30 ring-1 ring-[#84cc16]/40'
                     : runIcon === 'upload'
-                      ? 'text-warning hover:bg-warning/10'
-                      : 'text-accent hover:bg-accent/10'
+                      ? 'bg-warning/20 text-warning hover:bg-warning/30 ring-1 ring-warning/40'
+                      : 'bg-accent/25 text-white hover:bg-accent/40 ring-1 ring-accent/50'
               }`}
               title={
                 runDisabled
