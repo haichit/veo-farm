@@ -201,7 +201,7 @@ export function BuilderToolbar() {
       </button>
 
       <span className="text-[11px] text-text-muted ml-auto mr-3 hidden md:inline">
-        Scroll: zoom | Alt+drag: pan | Del: xoá
+        Drag: chọn nhiều | Alt/MMB-drag: pan | Scroll: zoom | Del: xoá
       </span>
 
       <button
