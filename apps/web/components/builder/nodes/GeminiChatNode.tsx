@@ -77,7 +77,13 @@ export function GeminiChatNode(props: NodeProps) {
           </div>
           <textarea
             value={cfg.manualOutput || lastOutput}
-            onChange={(e) => updateConfig(props.id, { manualOutput: e.target.value })}
+            onChange={(e) => {
+              const v = e.target.value;
+              // Only treat as a real override when the user types something
+              // DIFFERENT from the auto-filled lastOutputText. Saves the
+              // user from accidentally locking the node with leftover state.
+              updateConfig(props.id, { manualOutput: v === lastOutput ? '' : v });
+            }}
             onMouseDown={(e) => e.stopPropagation()}
             placeholder="(output hiện sau khi Run)"
             className="nodrag nowheel flex-1 min-h-[60px] w-full bg-[#0c0c18] border border-success/30 rounded-md p-2 text-[11px] text-text-primary outline-none focus:border-accent resize-none"
