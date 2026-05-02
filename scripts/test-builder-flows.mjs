@@ -59,6 +59,31 @@ const FLOWS = {
     ];
     return { name: 'TEST: text→image→video (FRAME)', nodes, edges, executionOrder: topo(nodes, edges) };
   },
+  download: () => {
+    const p = id('prompt'), gi = id('image'), d = id('download');
+    const nodes = [
+      { id: p, type: 'prompt', position: { x: 0, y: 0 }, data: { config: { text: 'cat sleeping' } } },
+      { id: gi, type: 'generate_image', position: { x: 300, y: 0 }, data: { config: { ratio: 'landscape', quantity: 1, imageModel: 'nano_banana_2' } } },
+      { id: d, type: 'download', position: { x: 600, y: 0 }, data: { config: { quality: 'native' } } },
+    ];
+    const edges = [
+      { id: 'e1', source: p, target: gi, sourceHandle: 'output-0', targetHandle: 'input-0' },
+      { id: 'e2', source: gi, target: d, sourceHandle: 'output-0', targetHandle: 'input-0' },
+    ];
+    return { name: 'TEST: prompt → image → download', nodes, edges, executionOrder: topo(nodes, edges) };
+  },
+  frame: () => {
+    // Frame is a visual group node — doesn't affect data flow. Just verify
+    // a workflow that contains a frame node alongside real nodes still runs.
+    const f = id('frame'), p = id('prompt'), gi = id('image');
+    const nodes = [
+      { id: f, type: 'frame', position: { x: -50, y: -50 }, data: { config: { name: 'Group A', width: 700, height: 300 } } },
+      { id: p, type: 'prompt', position: { x: 0, y: 0 }, data: { config: { text: 'mountain at sunset' } }, parentId: f },
+      { id: gi, type: 'generate_image', position: { x: 300, y: 0 }, data: { config: { ratio: 'landscape', quantity: 1, imageModel: 'nano_banana_2' } }, parentId: f },
+    ];
+    const edges = [{ id: 'e1', source: p, target: gi, sourceHandle: 'output-0', targetHandle: 'input-0' }];
+    return { name: 'TEST: frame containing prompt + image', nodes, edges, executionOrder: topo(nodes, edges) };
+  },
   gemini: () => {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) { console.error('GEMINI_API_KEY missing'); process.exit(1); }

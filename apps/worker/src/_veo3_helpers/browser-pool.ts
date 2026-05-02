@@ -100,6 +100,48 @@ export async function acquireTokenManager(opts: AcquireOptions): Promise<Acquire
   slot.mutex = myTurn;
   await prev;
 
+  // Detect a dead/detached page on a warm slot — happens when a previous
+  // job crashed mid-flight or the user closed the Brave tab. Drop the slot
+  // so we cold-start fresh below.
+  if (slot.tm) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tmAny = slot.tm as any;
+    const page = tmAny._page;
+    const browser = tmAny._browser;
+    const dead =
+      !page ||
+      !browser ||
+      browser.isConnected?.() === false ||
+      page.isClosed?.() === true ||
+      (() => {
+        try {
+          const u = page.url();
+          return !u || u === 'about:blank' || u.startsWith('chrome-error://');
+        } catch {
+          return true;
+        }
+      })();
+    if (dead) {
+      logger.warn(
+        { accountId: opts.accountId },
+        'browser-pool: warm slot looks dead, dropping for cold start',
+      );
+      slots.delete(opts.accountId);
+      try {
+        await slot.tm.close();
+      } catch {
+        /* ignore */
+      }
+      slot = {
+        tm: null as unknown as TokenManager,
+        lastUsed: Date.now(),
+        inFlight: 0,
+        mutex: Promise.resolve(),
+      };
+      slots.set(opts.accountId, slot);
+    }
+  }
+
   // Lazy-launch on first use OR after a previous failure invalidated tm.
   if (!slot.tm) {
     const captchaUrl = process.env.CAPTCHA_SERVER_URL ?? 'http://127.0.0.1:3456';
