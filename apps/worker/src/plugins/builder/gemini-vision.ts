@@ -10,6 +10,7 @@
 //   3. Call models/{model}:generateContent with parts: [text, fileData...].
 //   4. Return concatenated text from candidates[0].
 
+import * as crypto from 'node:crypto';
 import { downloadFromUrl } from '../../core/storage.js';
 import { logger } from '../../core/logger.js';
 
@@ -133,40 +134,37 @@ async function uploadToFilesApi(
   buffer: Buffer,
   mimeType: string,
 ): Promise<UploadedFile> {
-  // Resumable upload protocol — start, then upload bytes.
-  const startRes = await fetch(`${GEMINI_BASE}/files?key=${encodeURIComponent(apiKey)}`, {
-    method: 'POST',
-    headers: {
-      'X-Goog-Upload-Protocol': 'resumable',
-      'X-Goog-Upload-Command': 'start',
-      'X-Goog-Upload-Header-Content-Length': String(buffer.byteLength),
-      'X-Goog-Upload-Header-Content-Type': mimeType,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ file: { displayName: `veo-farm-${Date.now()}` } }),
-  });
-  if (!startRes.ok) {
-    throw new Error(`Files API start ${startRes.status}: ${(await startRes.text()).slice(0, 300)}`);
-  }
-  const uploadUrl = startRes.headers.get('x-goog-upload-url');
-  if (!uploadUrl) throw new Error('Files API: missing x-goog-upload-url header');
+  // Multipart upload via /upload/v1beta/files?uploadType=multipart — simpler
+  // than resumable and works for files ≤50MB which is the API limit anyway.
+  const boundary = `-----${crypto.randomBytes(16).toString('hex')}`;
+  const meta = JSON.stringify({ file: { displayName: `veo-farm-${Date.now()}` } });
+  const head = Buffer.from(
+    `--${boundary}\r\n` +
+      'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+      meta +
+      `\r\n--${boundary}\r\n` +
+      `Content-Type: ${mimeType}\r\n\r\n`,
+    'utf8',
+  );
+  const tail = Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8');
+  const body = Buffer.concat([head, buffer, tail]);
 
-  const uploadRes = await fetch(uploadUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Length': String(buffer.byteLength),
-      'X-Goog-Upload-Offset': '0',
-      'X-Goog-Upload-Command': 'upload, finalize',
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/upload/v1beta/files?uploadType=multipart&key=${encodeURIComponent(apiKey)}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': `multipart/related; boundary=${boundary}`,
+        'Content-Length': String(body.byteLength),
+      },
+      body,
     },
-    body: buffer,
-  });
-  if (!uploadRes.ok) {
-    throw new Error(
-      `Files API upload ${uploadRes.status}: ${(await uploadRes.text()).slice(0, 300)}`,
-    );
+  );
+  if (!res.ok) {
+    throw new Error(`Files API upload ${res.status}: ${(await res.text()).slice(0, 400)}`);
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data = (await uploadRes.json()) as any;
+  const data = (await res.json()) as any;
   const file = data?.file ?? data;
   if (!file?.uri || !file?.name) {
     throw new Error(`Files API: unexpected upload response: ${JSON.stringify(data).slice(0, 200)}`);
