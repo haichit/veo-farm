@@ -56,21 +56,33 @@ export function getNodeInputPorts(node: NodeForPorts, edges: Edge[]): PortDef[] 
 
   // Port 0: primary text input.
   const textPortName =
-    node.type === 'gemini_prompt' || node.type === 'gemini_prompt_kie' ? 'text' : 'prompt';
+    node.type === 'gemini_prompt' || node.type === 'gemini_prompt_kie' || node.type === 'gemini_vision'
+      ? 'text'
+      : 'prompt';
 
   const ports: PortDef[] = [
     { name: textPortName, type: 'string', color: PORT_COLORS.string, optional: true },
   ];
 
   // Ports 1..showSlots: media reference slots.
+  const isVisionNode = node.type === 'gemini_vision';
   for (let i = 0; i < showSlots; i++) {
     let portName: string;
     if (isVideoNode && isFrameMode) {
       portName = i === 0 ? 'Start Frame' : 'End Frame';
+    } else if (isVisionNode) {
+      portName = `media ${i + 1}`;
     } else {
       portName = `ref img ${i + 1}`;
     }
-    ports.push({ name: portName, type: 'image', color: PORT_COLORS.image });
+    // Gemini Vision accepts both image and video — use 'any' colour so
+    // edges from upload_media (video) or generate_image (image) both fit.
+    const portType = isVisionNode ? 'any' : 'image';
+    ports.push({
+      name: portName,
+      type: portType,
+      color: isVisionNode ? PORT_COLORS.any : PORT_COLORS.image,
+    });
   }
 
   return ports;

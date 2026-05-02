@@ -38,6 +38,7 @@ export const BUILDER_NODE_TYPES = [
   'upload_image',
   'gemini_prompt',
   'gemini_prompt_kie',
+  'gemini_vision',
   'generate_image',
   'generate_video',
   'merge_video',
@@ -120,6 +121,24 @@ export const NODE_TYPES: Record<BuilderNodeType, NodeTypeDef> = {
     defaults: { apiKey: '', model: 'gemini-2.0-flash-exp', promptTemplate: '' },
     width: 280,
     minHeight: 110,
+  },
+  gemini_vision: {
+    type: 'gemini_vision',
+    label: '👁️ Gemini Vision',
+    category: 'generate',
+    color: '#22c55e',
+    icon: 'Eye',
+    // Port 0: text prompt. Dynamic ref slots are added by getNodeInputPorts
+    // (same N+1 mechanism as generate_image) so user can wire 1+ media inputs.
+    inputs: [{ name: 'text', type: 'string', color: PORT_COLORS.string, optional: true }],
+    outputs: [{ name: 'text', type: 'string', color: PORT_COLORS.string }],
+    defaults: {
+      apiKey: '',
+      model: 'gemini-2.5-flash',
+      promptTemplate: 'Mô tả chi tiết nội dung trong media này.',
+    },
+    width: 280,
+    minHeight: 130,
   },
   generate_image: {
     type: 'generate_image',
@@ -273,5 +292,6 @@ export const NODE_AVG_RUNTIME_MS: Partial<Record<BuilderNodeType, number>> = {
   generate_video: 85_000,
   gemini_prompt: 6_000,
   gemini_prompt_kie: 6_000,
+  gemini_vision: 20_000,
   merge_video: 12_000,
 };

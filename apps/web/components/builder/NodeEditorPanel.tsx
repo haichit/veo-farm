@@ -152,6 +152,39 @@ export function NodeEditorPanel() {
           </>
         )}
 
+        {type === 'gemini_vision' && (
+          <>
+            <TextEdit
+              label="API Key (aistudio.google.com/apikey)"
+              value={(cfg.apiKey as string) ?? ''}
+              onChange={(v) => updateConfig(node.id, { apiKey: v })}
+              placeholder="AIza..."
+              rows={1}
+              monospace
+            />
+            <Select
+              label="Model"
+              value={(cfg.model as string) ?? 'gemini-2.5-flash'}
+              onChange={(v) => updateConfig(node.id, { model: v })}
+              options={[
+                { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (multimodal)' },
+                { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (chậm, chất hơn)' },
+                { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+              ]}
+            />
+            <TextEdit
+              label="Câu hỏi cho media"
+              value={(cfg.promptTemplate as string) ?? ''}
+              onChange={(v) => updateConfig(node.id, { promptTemplate: v })}
+              placeholder="vd: Mô tả chi tiết, viết prompt giống ảnh, tóm tắt video..."
+              rows={4}
+            />
+            <Field label="Media input">
+              Cắm Upload Media / Generate Image vào port &quot;media N&quot; bên trái. File ≤50MB.
+            </Field>
+          </>
+        )}
+
         {type === 'generate_image' && (
           <>
             <Select
