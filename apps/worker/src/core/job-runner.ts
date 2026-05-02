@@ -40,6 +40,14 @@ interface BuilderJobGraph {
   nodes: Array<{ id: string; type: string; data?: { config?: Record<string, unknown> } }>;
   edges: Array<{ source: string; target: string }>;
   executionOrder?: string[];
+  /** Subset of nodes the user explicitly asked to (re-)run. Cached
+   *  outputs for these are deliberately discarded so the user sees a
+   *  fresh result. */
+  targetNodeIds?: string[];
+  /** UI-supplied snapshot of upstream outputs from a previous run.
+   *  Worker pre-loads these into the outputs map so partial runs (▶ on
+   *  one node) reuse already-generated images/videos without re-running. */
+  cachedOutputs?: Record<string, unknown>;
 }
 
 /**
@@ -486,6 +494,20 @@ async function runBuilderStub(job: Job): Promise<{ outputUrl: string }> {
   // its inputs from upstream Text/Prompt nodes.
   const outputs = new Map<string, unknown>();
 
+  // Pre-load UI-supplied cached outputs so partial runs (▶ on a single
+  // node) skip re-generation of upstream nodes that already produced
+  // images/videos in a previous run. Targets always re-run.
+  const cachedOutputs = graph.cachedOutputs ?? {};
+  const targetIdSet = new Set(graph.targetNodeIds ?? []);
+  const cachedNodeIds = new Set<string>();
+  for (const [nodeId, cached] of Object.entries(cachedOutputs)) {
+    if (targetIdSet.has(nodeId)) continue; // never reuse cache for an explicit target
+    if (cached && typeof cached === 'object') {
+      outputs.set(nodeId, cached);
+      cachedNodeIds.add(nodeId);
+    }
+  }
+
   // Reverse adjacency — for each node, which upstream nodes feed which input.
   const incomingByNode = new Map<string, Array<{ source: string; targetHandle?: string }>>();
   for (const e of graph.edges) {
@@ -497,11 +519,39 @@ async function runBuilderStub(job: Job): Promise<{ outputUrl: string }> {
     });
   }
 
-  logger.info({ jobId: job.id, total }, 'runBuilder: start');
+  logger.info(
+    { jobId: job.id, total, cachedReuseCount: cachedNodeIds.size },
+    'runBuilder: start',
+  );
 
   for (const nodeId of order) {
     const node = graph.nodes.find((n) => n.id === nodeId);
     if (!node) continue;
+
+    // Cached upstream — skip execution, mark sub_job completed straight away.
+    if (cachedNodeIds.has(nodeId)) {
+      logger.info({ jobId: job.id, nodeId, type: node.type }, 'runBuilder: reusing cached output');
+      const cachedOutput = outputs.get(nodeId) as Record<string, unknown>;
+      const { data: subJob } = await supabase()
+        .from('sub_jobs')
+        .insert({
+          job_id: job.id,
+          node_id: nodeId,
+          node_type: node.type,
+          status: 'completed',
+          input: node.data?.config ?? {},
+          output: cachedOutput,
+          started_at: new Date().toISOString(),
+          finished_at: new Date().toISOString(),
+        })
+        .select('id')
+        .single();
+      void subJob;
+      done += 1;
+      wait = Math.max(0, total - done - err);
+      await supabase().from('jobs').update({ stats: { done, wait, err } }).eq('id', job.id);
+      continue;
+    }
 
     // Honour pause/cancel before each step.
     const { data: cur } = await supabase()

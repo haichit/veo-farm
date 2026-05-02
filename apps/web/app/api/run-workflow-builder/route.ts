@@ -55,7 +55,18 @@ export async function POST(req: Request) {
       user_id: user.id,
       flow_id: null,
       workflow_id: typeof body?.workflowId === 'string' ? body.workflowId : null,
-      flow_graph: { ...wf, executionOrder, targetNodeIds },
+      flow_graph: {
+        ...wf,
+        executionOrder,
+        targetNodeIds,
+        // UI-supplied snapshot of upstream outputs so the worker can skip
+        // re-generation on a partial run. Keys are nodeId, values are
+        // {text?, image?, video?, media?, imageUrl?}.
+        cachedOutputs:
+          body?.cachedOutputs && typeof body.cachedOutputs === 'object'
+            ? body.cachedOutputs
+            : undefined,
+      },
       status: 'pending',
       input: {},
       stats: { done: 0, wait: executionOrder.length, err: 0 },

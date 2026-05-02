@@ -25,29 +25,43 @@ export function useWorkflowRun() {
         alert('Workflow chưa có node nào.');
         return;
       }
-      // Partial reset: when running a specific node (▶ on node / Run frame),
-      // only clear status+output for that node and its upstream ancestors.
-      // Other nodes' previous outputs stay visible. Full reset only when
-      // running the whole workflow from the toolbar.
+      // Partial run UX: when ▶ a specific node, ONLY reset the target(s).
+      // Upstream ancestors keep their existing outputs and the worker
+      // reuses them via cachedOutputs (so already-generated images/videos
+      // don't get re-generated). Toolbar Run still does a full reset.
       const targetIds = Array.isArray(target) ? target : target ? [target] : null;
+      const cachedOutputs: Record<string, unknown> = {};
       if (targetIds && targetIds.length > 0) {
-        const reverseAdj = new Map<string, string[]>();
-        for (const e of edges) {
-          if (!reverseAdj.has(e.target)) reverseAdj.set(e.target, []);
-          reverseAdj.get(e.target)!.push(e.source);
-        }
-        const ancestors = new Set<string>(targetIds);
-        const stack = [...targetIds];
-        while (stack.length) {
-          const id = stack.pop()!;
-          for (const src of reverseAdj.get(id) ?? []) {
-            if (!ancestors.has(src)) {
-              ancestors.add(src);
-              stack.push(src);
-            }
+        resetNodesStatus(targetIds);
+        // Build cache from upstream nodes' current preview / output text.
+        const targetSet = new Set(targetIds);
+        for (const n of nodes) {
+          if (targetSet.has(n.id)) continue;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const data = n.data as any;
+          const cached: Record<string, unknown> = {};
+          if (typeof data?.lastOutputText === 'string' && data.lastOutputText.trim()) {
+            cached.text = data.lastOutputText;
           }
+          if (Array.isArray(data?.previewMedia) && data.previewMedia.length > 0) {
+            cached.media = data.previewMedia;
+            const first = data.previewMedia[0];
+            if (first?.kind === 'video') cached.video = first.url;
+            else if (first?.kind === 'image') cached.image = first.url;
+          }
+          // Also copy through pass-through outputs we know about.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const cfg = (data?.config ?? {}) as any;
+          if (n.type === 'prompt' && typeof cfg.text === 'string') {
+            cached.text = cached.text ?? cfg.text;
+          }
+          if (n.type === 'upload_image' && typeof cfg.imageUrl === 'string' && cfg.imageUrl) {
+            cached.image = cached.image ?? cfg.imageUrl;
+            cached.imageUrl = cfg.imageUrl;
+            cached.media = cached.media ?? [{ url: cfg.imageUrl, kind: 'image' }];
+          }
+          if (Object.keys(cached).length > 0) cachedOutputs[n.id] = cached;
         }
-        resetNodesStatus([...ancestors]);
       } else {
         resetAllNodeStatus();
       }
@@ -107,6 +121,7 @@ export function useWorkflowRun() {
             workflow,
             workflowId: currentWorkflowId,
             targetNodeIds,
+            cachedOutputs: Object.keys(cachedOutputs).length > 0 ? cachedOutputs : undefined,
           }),
         });
         if (!r.ok) {
