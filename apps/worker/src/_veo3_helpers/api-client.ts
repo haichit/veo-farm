@@ -616,7 +616,22 @@ export class ApiClient extends EventEmitter {
     recaptchaAction: string,
   ): Promise<HttpResponse<T>> {
     let lastErr: unknown;
-    for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
+    // Bump retry budget for transient network failures. Google's edge
+    // randomly RSTs connections (socket hang up / ECONNRESET) and a single
+    // retry isn't enough — give it 5 attempts with progressive backoff.
+    const NET_RETRY_MAX = 5;
+    const TRANSIENT_NET_PATTERNS = [
+      'socket hang up',
+      'ECONNRESET',
+      'ETIMEDOUT',
+      'ECONNREFUSED',
+      'EAI_AGAIN',
+      'EPIPE',
+      'fetch failed',
+      'Premature close',
+      'Client network socket disconnected',
+    ];
+    for (let attempt = 1; attempt <= NET_RETRY_MAX; attempt++) {
       try {
         const token = await this.tokenManager.getToken();
         const headers: Record<string, string> = {
@@ -633,6 +648,21 @@ export class ApiClient extends EventEmitter {
       } catch (err) {
         lastErr = err;
         if (!(err instanceof ApiError)) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const msg = String((err as any)?.message ?? err);
+          const isTransient = TRANSIENT_NET_PATTERNS.some((p) => msg.includes(p));
+          if (isTransient && attempt < NET_RETRY_MAX) {
+            // Progressive backoff: 3s, 6s, 12s, 24s. Re-fetch bearer token
+            // on retry — the original may have been invalidated by Google
+            // alongside the RST.
+            await sleep(3000 * Math.pow(2, attempt - 1));
+            try {
+              await this.tokenManager.getToken();
+            } catch {
+              /* token refresh may also fail transiently — keep retrying */
+            }
+            continue;
+          }
           if (attempt < RETRY_MAX) {
             await sleep(5000 * attempt);
             continue;
