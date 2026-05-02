@@ -731,13 +731,17 @@ export const useFlowStore = create<FlowStoreState>()(
       partialize: (state) => ({
         nodes: state.nodes.map((n) => ({
           ...n,
-          // Strip ephemeral status badges so a stale "running" doesn't
-          // reappear after reload. Also strip giant data: URLs from upload
-          // nodes — they blow past the 5MB localStorage quota for any
-          // non-trivial file. User will need to re-upload after reload.
+          // Persist generated outputs (image/video URLs + Gemini text) so
+          // they survive F5. Strip status/error/progress (ephemeral) and
+          // giant data: URLs (localStorage quota). Signed URLs expire
+          // after 24h; stale URLs are still fine to show, user just hits
+          // the album/regen if they need a fresh one.
           data: {
             config: stripBigBlobs(n.data?.config ?? {}),
             label: n.data?.label,
+            previewMedia: n.data?.previewMedia,
+            lastOutputText: n.data?.lastOutputText,
+            frameId: n.data?.frameId,
           },
         })),
         edges: state.edges,
@@ -745,7 +749,7 @@ export const useFlowStore = create<FlowStoreState>()(
         currentWorkflowName: state.currentWorkflowName,
         defaultGeminiApiKey: state.defaultGeminiApiKey,
       }),
-      version: 2,
+      version: 3,
     },
   ),
 );
