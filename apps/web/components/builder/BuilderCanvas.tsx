@@ -6,8 +6,10 @@ import {
   Controls,
   MiniMap,
   ReactFlow,
+  reconnectEdge,
   useReactFlow,
   type Connection,
+  type Edge,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useCallback, useRef } from 'react';
@@ -28,6 +30,7 @@ export function BuilderCanvas() {
   const onNodesChange = useFlowStore((s) => s.onNodesChange);
   const onEdgesChange = useFlowStore((s) => s.onEdgesChange);
   const onConnect = useFlowStore((s) => s.onConnect);
+  const setEdges = useFlowStore((s) => s.setEdges);
   const addNode = useFlowStore((s) => s.addNode);
   const selectNode = useFlowStore((s) => s.selectNode);
   const selectMany = useFlowStore((s) => s.selectMany);
@@ -76,6 +79,30 @@ export function BuilderCanvas() {
     [],
   );
 
+  // Edge reconnection — drag either endpoint of an existing edge to a new
+  // port. If the user drops onto empty canvas, the edge is removed instead.
+  const reconnectDoneRef = useRef(true);
+  const onReconnectStart = useCallback(() => {
+    reconnectDoneRef.current = false;
+  }, []);
+  const onReconnect = useCallback(
+    (oldEdge: Edge, newConnection: Connection) => {
+      reconnectDoneRef.current = true;
+      setEdges(reconnectEdge(oldEdge, newConnection, useFlowStore.getState().edges));
+    },
+    [setEdges],
+  );
+  const onReconnectEnd = useCallback(
+    (_evt: unknown, edge: Edge) => {
+      if (!reconnectDoneRef.current) {
+        // Endpoint dropped on empty canvas → delete the edge.
+        setEdges(useFlowStore.getState().edges.filter((e) => e.id !== edge.id));
+      }
+      reconnectDoneRef.current = true;
+    },
+    [setEdges],
+  );
+
   return (
     <div
       ref={wrapperRef}
@@ -92,9 +119,13 @@ export function BuilderCanvas() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onReconnect={onReconnect}
+        onReconnectStart={onReconnectStart}
+        onReconnectEnd={onReconnectEnd}
+        edgesReconnectable
         nodeTypes={customNodeTypes}
         edgeTypes={customEdgeTypes}
-        defaultEdgeOptions={{ type: 'colored' }}
+        defaultEdgeOptions={{ type: 'colored', reconnectable: true }}
         isValidConnection={isValidConnection}
         onSelectionChange={({ nodes: selNodes }) => {
           if (selNodes.length === 0) selectNode(null);
