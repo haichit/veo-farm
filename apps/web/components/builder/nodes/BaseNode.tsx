@@ -11,6 +11,7 @@ import {
 } from '@/lib/builder/node-types';
 import { getNodeInputPorts, inputHandleId, outputHandleId } from '@/lib/builder/dynamic-ports';
 import { useFlowStore, type BuilderNodeData } from '@/lib/builder/flow-store';
+import { useWorkflowRun } from '@/lib/builder/use-workflow-run';
 import { PreviewMedia } from '../preview/PreviewMedia';
 
 interface BaseNodeProps extends NodeProps {
@@ -38,11 +39,16 @@ export function BaseNode(props: BaseNodeProps) {
   const edges = useFlowStore((s) => s.edges);
   const node = useFlowStore((s) => s.nodes.find((n) => n.id === id));
   const selectNode = useFlowStore((s) => s.selectNode);
+  const { startRun } = useWorkflowRun();
 
   // Auto-derive showDownload when caller didn't override it.
   const effectiveShowDownload = showDownload ?? previewMedia.length > 0;
   // Default Info click → open right editor panel.
   const effectiveInfoClick = onInfoClick ?? (() => selectNode(id));
+  // Default Run click — run the whole workflow with this node as the target
+  // so worker stops after this node executes (saves time when iterating on
+  // a single branch). Caller can override with their own onRun.
+  const effectiveRun = onRun ?? (() => void startRun(id));
   // Default Download click → open first media in a new tab.
   const effectiveDownload =
     onDownload ??
@@ -198,7 +204,7 @@ export function BaseNode(props: BaseNodeProps) {
               disabled={runDisabled}
               onClick={(e) => {
                 e.stopPropagation();
-                if (!runDisabled) onRun?.();
+                if (!runDisabled) effectiveRun();
               }}
               onMouseDown={(e) => e.stopPropagation()}
               className={`nodrag w-[22px] h-[22px] flex items-center justify-center rounded transition-colors ${

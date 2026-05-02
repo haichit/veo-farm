@@ -27,22 +27,55 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'workflow contains a cycle' }, { status: 400 });
   }
 
+  // Optional: per-node Run button passes targetNodeId so the worker only
+  // executes the target's transitive dependencies (saves time + tokens
+  // when iterating on a single branch).
+  let executionOrder = order;
+  const targetNodeId = typeof body?.targetNodeId === 'string' ? body.targetNodeId : null;
+  if (targetNodeId) {
+    const ancestors = collectAncestors(wf, targetNodeId);
+    executionOrder = order.filter((id) => ancestors.has(id));
+  }
+
   const { data, error } = await sb
     .from('jobs')
     .insert({
       user_id: user.id,
       flow_id: null,
       workflow_id: typeof body?.workflowId === 'string' ? body.workflowId : null,
-      flow_graph: { ...wf, executionOrder: order },
+      flow_graph: { ...wf, executionOrder, targetNodeId },
       status: 'pending',
       input: {},
-      stats: { done: 0, wait: order.length, err: 0 },
+      stats: { done: 0, wait: executionOrder.length, err: 0 },
     })
     .select('id')
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   return NextResponse.json({ jobId: data.id });
+}
+
+// Walk edges backwards from `targetId` and collect every transitive
+// upstream node (plus the target itself). Used to trim the execution
+// order when the user clicks Run on a specific node.
+function collectAncestors(wf: WorkflowJSON, targetId: string): Set<string> {
+  const reverseAdj = new Map<string, string[]>();
+  for (const e of wf.edges) {
+    if (!reverseAdj.has(e.target)) reverseAdj.set(e.target, []);
+    reverseAdj.get(e.target)!.push(e.source);
+  }
+  const seen = new Set<string>([targetId]);
+  const stack = [targetId];
+  while (stack.length) {
+    const id = stack.pop()!;
+    for (const src of reverseAdj.get(id) ?? []) {
+      if (!seen.has(src)) {
+        seen.add(src);
+        stack.push(src);
+      }
+    }
+  }
+  return seen;
 }
 
 // Kahn's algorithm — null on cycle.
