@@ -46,6 +46,8 @@ export interface BuilderNodeData extends Record<string, unknown> {
   progress?: number;
   /** Media outputs to preview inline (post-success). */
   previewMedia?: PreviewMedia[];
+  /** Last text output from gemini_prompt / prompt nodes (post-success). */
+  lastOutputText?: string;
   /** Last error message (renders red status dot). */
   error?: string;
   label?: string;
@@ -129,6 +131,7 @@ interface FlowStoreState {
     extra?: { error?: string; progress?: number },
   ) => void;
   setNodePreview: (nodeId: string, media: PreviewMedia[]) => void;
+  setNodeOutputText: (nodeId: string, text: string) => void;
   setStats: (stats: BuilderStats) => void;
   resetAllNodeStatus: () => void;
 
@@ -313,6 +316,12 @@ export const useFlowStore = create<FlowStoreState>()(
       ),
       // Also feed the album so the gallery overlay accumulates everything.
       albumMedia: [...s.albumMedia, ...media],
+    })),
+  setNodeOutputText: (nodeId, text) =>
+    set((s) => ({
+      nodes: s.nodes.map((n) =>
+        n.id === nodeId ? { ...n, data: { ...n.data, lastOutputText: text } } : n,
+      ),
     })),
   setStats: (stats) => set({ stats }),
   resetAllNodeStatus: () =>

@@ -19,6 +19,7 @@ import { useFlowStore, type NodeStatus, type PreviewMedia } from './flow-store';
 export function useJobSubscription(jobId: string | null) {
   const updateNodeStatus = useFlowStore((s) => s.updateNodeStatus);
   const setNodePreview = useFlowStore((s) => s.setNodePreview);
+  const setNodeOutputText = useFlowStore((s) => s.setNodeOutputText);
   const setStats = useFlowStore((s) => s.setStats);
   const setRunState = useFlowStore((s) => s.setRunState);
 
@@ -47,6 +48,10 @@ export function useJobSubscription(jobId: string | null) {
         seenMediaForNode.add(row.node_id);
         setNodePreview(row.node_id, media);
       }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const o = row.output as any;
+      const txt = typeof o?.text === 'string' ? o.text : null;
+      if (txt && txt.trim()) setNodeOutputText(row.node_id, txt);
     }
 
     function applyJob(row: { status?: string; stats?: { done: number; wait: number; err: number } }) {

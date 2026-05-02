@@ -20,6 +20,8 @@ export interface GeminiPromptNodeInput {
     promptTemplate?: string;
     useAdditionalText?: boolean;
     additionalText?: string;
+    /** User-edited output override — bypasses the API call when present. */
+    manualOutput?: string;
   };
 }
 
@@ -30,6 +32,14 @@ export interface GeminiPromptNodeOutput {
 export async function runGeminiPromptNode(
   input: GeminiPromptNodeInput,
 ): Promise<GeminiPromptNodeOutput> {
+  // User-edited override wins over the API call. Lets the user fix bad
+  // Gemini output without re-running and re-paying the latency.
+  const override = input.config.manualOutput?.trim();
+  if (override) {
+    logger.info({ len: override.length }, 'gemini_prompt: using manual override (skipping API)');
+    return { text: override };
+  }
+
   const apiKey = input.config.apiKey?.trim();
   if (!apiKey) {
     throw new Error(

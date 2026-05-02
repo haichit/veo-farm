@@ -745,6 +745,7 @@ async function executeBuilderNode(
         promptTemplate: cfg.promptTemplate as string | undefined,
         useAdditionalText: cfg.useAdditionalText as boolean | undefined,
         additionalText: cfg.additionalText as string | undefined,
+        manualOutput: cfg.manualOutput as string | undefined,
       },
     });
     return { text: out.text };
