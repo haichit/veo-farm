@@ -84,8 +84,8 @@ export async function runGenerateImageNode(
   await rateLimiter.throttle();
 
   // Reuse the same provider id Veo3 plugins use — same Google account works
-  // for both image and video.
-  const account = await claimAccount(input.userId, 'veo3_flow_v2');
+  // for both image and video. Provider registered as 'veo3' in the UI.
+  const account = await claimAccount(input.userId, 'veo3');
   const cookies = decryptCookies(account);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const meta = (account.meta ?? {}) as Record<string, any>;
