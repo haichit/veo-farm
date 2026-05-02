@@ -13,6 +13,7 @@ import type { WorkflowJSON } from '@veo-farm/shared';
 export function useWorkflowRun() {
   const setRunState = useFlowStore((s) => s.setRunState);
   const resetAllNodeStatus = useFlowStore((s) => s.resetAllNodeStatus);
+  const resetNodesStatus = useFlowStore((s) => s.resetNodesStatus);
   const setCurrentJobId = useFlowStore((s) => s.setCurrentJobId);
   const currentWorkflowId = useFlowStore((s) => s.currentWorkflowId);
   const currentWorkflowName = useFlowStore((s) => s.currentWorkflowName);
@@ -24,7 +25,32 @@ export function useWorkflowRun() {
         alert('Workflow chưa có node nào.');
         return;
       }
-      resetAllNodeStatus();
+      // Partial reset: when running a specific node (▶ on node / Run frame),
+      // only clear status+output for that node and its upstream ancestors.
+      // Other nodes' previous outputs stay visible. Full reset only when
+      // running the whole workflow from the toolbar.
+      const targetIds = Array.isArray(target) ? target : target ? [target] : null;
+      if (targetIds && targetIds.length > 0) {
+        const reverseAdj = new Map<string, string[]>();
+        for (const e of edges) {
+          if (!reverseAdj.has(e.target)) reverseAdj.set(e.target, []);
+          reverseAdj.get(e.target)!.push(e.source);
+        }
+        const ancestors = new Set<string>(targetIds);
+        const stack = [...targetIds];
+        while (stack.length) {
+          const id = stack.pop()!;
+          for (const src of reverseAdj.get(id) ?? []) {
+            if (!ancestors.has(src)) {
+              ancestors.add(src);
+              stack.push(src);
+            }
+          }
+        }
+        resetNodesStatus([...ancestors]);
+      } else {
+        resetAllNodeStatus();
+      }
       setRunState('running');
       // Defensive — if any node still holds a giant data: URL (from before
       // /api/upload-media existed), the Postgres INSERT will time out. Drop
@@ -66,7 +92,7 @@ export function useWorkflowRun() {
           `Đã loại bỏ ${stripped} file lớn cũ khỏi workflow (data URL). Vui lòng pick lại file qua nút Upload Media — hệ thống mới sẽ upload thẳng lên Storage.`,
         );
       }
-      const targetNodeIds = Array.isArray(target) ? target : target ? [target] : null;
+      const targetNodeIds = targetIds;
       try {
         // eslint-disable-next-line no-console
         console.log('[builder] POST /api/run-workflow-builder', {

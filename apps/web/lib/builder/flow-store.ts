@@ -122,6 +122,14 @@ interface FlowStoreState {
   updateNodeData: (id: string, patch: Partial<BuilderNodeData>) => void;
   updateNodeConfig: (id: string, patch: Record<string, unknown>) => void;
   removeNodes: (ids: string[]) => void;
+  /**
+   * Re-parent a node to a frame (or detach when newParentId=null), adjusting
+   * position so the node stays in place on screen — React Flow stores child
+   * positions RELATIVE to parent so naive reassignment makes the child jump.
+   */
+  setNodeParent: (nodeId: string, newParentId: string | null) => void;
+  /** Reset only the listed nodes (status / preview / output). */
+  resetNodesStatus: (ids: string[]) => void;
 
   // ── Actions: selection ──
   selectNode: (id: string | null) => void;
@@ -314,6 +322,54 @@ export const useFlowStore = create<FlowStoreState>()(
       edges: s.edges.filter((e) => !idSet.has(e.source) && !idSet.has(e.target)),
       selectedNodeId: s.selectedNodeId && idSet.has(s.selectedNodeId) ? null : s.selectedNodeId,
       selectedNodeIds: s.selectedNodeIds.filter((nid) => !idSet.has(nid)),
+    }));
+  },
+  setNodeParent: (nodeId, newParentId) =>
+    set((s) => {
+      const node = s.nodes.find((n) => n.id === nodeId);
+      if (!node) return {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const oldParentId = (node as any).parentId as string | undefined;
+      if (oldParentId === (newParentId ?? undefined)) return {};
+      const oldParent = oldParentId ? s.nodes.find((n) => n.id === oldParentId) : null;
+      const newParent = newParentId ? s.nodes.find((n) => n.id === newParentId) : null;
+      // Compute current absolute screen position.
+      const absX = (oldParent?.position?.x ?? 0) + node.position.x;
+      const absY = (oldParent?.position?.y ?? 0) + node.position.y;
+      // Convert into the new parent's local frame (or stay absolute).
+      const nx = absX - (newParent?.position?.x ?? 0);
+      const ny = absY - (newParent?.position?.y ?? 0);
+      return {
+        nodes: s.nodes.map((n) =>
+          n.id === nodeId
+            ? newParentId
+              ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                ({ ...n, position: { x: nx, y: ny }, parentId: newParentId, extent: 'parent', expandParent: false } as any)
+              : // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                ({ ...n, position: { x: nx, y: ny }, parentId: undefined, extent: undefined } as any)
+            : n,
+        ),
+      };
+    }),
+  resetNodesStatus: (ids) => {
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
+    set((s) => ({
+      nodes: s.nodes.map((n) =>
+        idSet.has(n.id)
+          ? {
+              ...n,
+              data: {
+                ...n.data,
+                status: 'idle',
+                progress: undefined,
+                error: undefined,
+                previewMedia: undefined,
+                lastOutputText: undefined,
+              },
+            }
+          : n,
+      ),
     }));
   },
 

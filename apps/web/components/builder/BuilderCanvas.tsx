@@ -34,6 +34,7 @@ export function BuilderCanvas() {
   const addNode = useFlowStore((s) => s.addNode);
   const selectNode = useFlowStore((s) => s.selectNode);
   const selectMany = useFlowStore((s) => s.selectMany);
+  const setNodeParent = useFlowStore((s) => s.setNodeParent);
 
   const currentJobId = useFlowStore((s) => s.currentJobId);
   useKeyboardShortcuts();
@@ -68,6 +69,40 @@ export function BuilderCanvas() {
       addNode(type, position);
     },
     [screenToFlowPosition, addNode],
+  );
+
+  // After dragging a node, if its centre lands inside any frame, attach it
+  // as a child so the frame "groups" it (frame moves → child moves).
+  // Drag a child outside all frames to detach.
+  const onNodeDragStop = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (_evt: React.MouseEvent, node: any) => {
+      if (node?.type === 'frame') return;
+      const allNodes = useFlowStore.getState().nodes;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const frames = allNodes.filter((n: any) => n.type === 'frame');
+      // Compute child's absolute centre (parent.position + child.position).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const parent = (node.parentId as string | undefined)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ? allNodes.find((n: any) => n.id === node.parentId)
+        : null;
+      const cx = (parent?.position?.x ?? 0) + node.position.x + (node.width ?? 240) / 2;
+      const cy = (parent?.position?.y ?? 0) + node.position.y + (node.height ?? 100) / 2;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const containing = frames.find((f: any) => {
+        const fx = f.position.x;
+        const fy = f.position.y;
+        const fw = f.width ?? f.data?.config?.width ?? 500;
+        const fh = f.height ?? f.data?.config?.height ?? 400;
+        return cx >= fx && cx <= fx + fw && cy >= fy && cy <= fy + fh;
+      });
+      const newParent = containing ? containing.id : null;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const oldParent = (node.parentId as string | undefined) ?? null;
+      if (newParent !== oldParent) setNodeParent(node.id, newParent);
+    },
+    [setNodeParent],
   );
 
   const isValidConnection = useCallback(
@@ -119,6 +154,7 @@ export function BuilderCanvas() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onNodeDragStop={onNodeDragStop}
         onReconnect={onReconnect}
         onReconnectStart={onReconnectStart}
         onReconnectEnd={onReconnectEnd}
