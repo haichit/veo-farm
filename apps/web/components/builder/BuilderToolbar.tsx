@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Play, Pause, Save, Square, Image as ImageIcon, ZoomIn, RotateCcw } from 'lucide-react';
+import { Play, Pause, Save, Square, Image as ImageIcon, ZoomIn, RotateCcw, Trash2 } from 'lucide-react';
 import { useReactFlow } from '@xyflow/react';
 import { useFlowStore } from '@/lib/builder/flow-store';
 import type { WorkflowJSON } from '@veo-farm/shared';
@@ -16,6 +16,7 @@ export function BuilderToolbar() {
   const openAlbum = useFlowStore((s) => s.openAlbum);
   const albumCount = useFlowStore((s) => s.albumMedia.length);
   const resetAllNodeStatus = useFlowStore((s) => s.resetAllNodeStatus);
+  const removeNodes = useFlowStore((s) => s.removeNodes);
   const setCurrentJobId = useFlowStore((s) => s.setCurrentJobId);
   const currentJobId = useFlowStore((s) => s.currentJobId);
   const nodes = useFlowStore((s) => s.nodes);
@@ -183,6 +184,20 @@ export function BuilderToolbar() {
         className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] bg-white/[0.03] border border-border text-text-secondary hover:bg-white/[0.06] hover:text-text-primary transition-colors"
       >
         <RotateCcw size={14} /> Reset
+      </button>
+
+      <button
+        type="button"
+        onClick={() => {
+          if (nodes.length === 0) return;
+          if (!window.confirm(`Xoá ${nodes.length} node + ${edges.length} edge khỏi canvas?`)) return;
+          removeNodes(nodes.map((n) => n.id));
+          setCurrentJobId(null);
+        }}
+        title="Xoá toàn bộ node trên canvas"
+        className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] bg-error/10 border border-error/30 text-error hover:bg-error/15 transition-colors"
+      >
+        <Trash2 size={14} /> Xoá hết
       </button>
 
       <span className="text-[11px] text-text-muted ml-auto mr-3 hidden md:inline">
