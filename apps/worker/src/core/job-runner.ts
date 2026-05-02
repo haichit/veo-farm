@@ -479,7 +479,22 @@ async function runBuilderStub(job: Job): Promise<{ outputUrl: string }> {
   let err = 0;
   let wait = total;
 
-  logger.info({ jobId: job.id, total }, 'runBuilderStub: start');
+  // Per-node outputs so a downstream node (e.g. generate_image) can resolve
+  // its inputs from upstream Text/Prompt nodes.
+  const outputs = new Map<string, unknown>();
+
+  // Reverse adjacency — for each node, which upstream nodes feed which input.
+  const incomingByNode = new Map<string, Array<{ source: string; targetHandle?: string }>>();
+  for (const e of graph.edges) {
+    if (!incomingByNode.has(e.target)) incomingByNode.set(e.target, []);
+    incomingByNode.get(e.target)!.push({
+      source: e.source,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      targetHandle: (e as any).targetHandle,
+    });
+  }
+
+  logger.info({ jobId: job.id, total }, 'runBuilder: start');
 
   for (const nodeId of order) {
     const node = graph.nodes.find((n) => n.id === nodeId);
@@ -497,7 +512,7 @@ async function runBuilderStub(job: Job): Promise<{ outputUrl: string }> {
       if (!again || (again as any).status !== 'paused') break;
     }
     if (cur && (cur as any).status === 'cancelled') {
-      logger.info({ jobId: job.id }, 'runBuilderStub: cancelled');
+      logger.info({ jobId: job.id }, 'runBuilder: cancelled');
       throw new Error('cancelled by user');
     }
 
@@ -514,35 +529,130 @@ async function runBuilderStub(job: Job): Promise<{ outputUrl: string }> {
       .select('id')
       .single();
 
-    // Simulate work — short for non-generators, longer for generators.
-    const dur = STUB_GENERATOR_TYPES.has(node.type) ? 1500 : 250;
-    await new Promise((r) => setTimeout(r, dur));
+    let output: Record<string, unknown> = {};
+    let nodeFailed = false;
+    let nodeError: string | undefined;
 
-    const output = STUB_GENERATOR_TYPES.has(node.type)
-      ? buildStubOutput(node.type)
-      : { ok: true };
+    try {
+      output = await executeBuilderNode(node, incomingByNode.get(nodeId) ?? [], outputs, job);
+    } catch (e) {
+      nodeFailed = true;
+      nodeError = (e as Error)?.message ?? String(e);
+      logger.error({ jobId: job.id, nodeId, err: nodeError }, 'runBuilder: node failed');
+    }
+
+    outputs.set(nodeId, output);
 
     if (subJob) {
       await supabase()
         .from('sub_jobs')
         .update({
-          status: 'completed',
-          output,
+          status: nodeFailed ? 'failed' : 'completed',
+          output: nodeFailed ? null : output,
+          error: nodeError ?? null,
           finished_at: new Date().toISOString(),
         })
         .eq('id', (subJob as any).id);
     }
 
-    done += 1;
+    if (nodeFailed) err += 1;
+    else done += 1;
     wait = Math.max(0, total - done - err);
     await supabase()
       .from('jobs')
       .update({ stats: { done, wait, err } })
       .eq('id', job.id);
+
+    if (nodeFailed) {
+      // Stop the run on first hard failure — downstream nodes have no inputs.
+      throw new Error(`node ${nodeId} (${node.type}) failed: ${nodeError}`);
+    }
   }
 
-  logger.info({ jobId: job.id, done }, 'runBuilderStub: complete');
+  logger.info({ jobId: job.id, done }, 'runBuilder: complete');
+  // Best-effort terminal output url — first downloadable media we produced.
+  for (const v of outputs.values()) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const m = (v as any)?.media;
+    if (Array.isArray(m) && m[0]?.url) return { outputUrl: m[0].url as string };
+  }
   return { outputUrl: STUB_PLACEHOLDER_VIDEO };
+}
+
+// Resolve the prompt text for a generate_image / generate_video / gemini_*
+// node by walking incoming edges and pulling text from upstream outputs or
+// the node's own config fallback.
+function resolvePrompt(
+  node: { id: string; type: string; data?: { config?: Record<string, unknown> } },
+  incoming: Array<{ source: string; targetHandle?: string }>,
+  outputs: Map<string, unknown>,
+): string {
+  // Port 0 (input-0) carries the primary text/prompt.
+  for (const e of incoming) {
+    if (e.targetHandle && e.targetHandle !== 'input-0') continue;
+    const up = outputs.get(e.source);
+    if (!up) continue;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const o = up as any;
+    if (typeof o.text === 'string' && o.text.trim()) return o.text;
+    if (typeof o.prompt === 'string' && o.prompt.trim()) return o.prompt;
+  }
+  const cfg = (node.data?.config ?? {}) as { text?: string; prompt?: string };
+  return cfg.text ?? cfg.prompt ?? '';
+}
+
+async function executeBuilderNode(
+  node: { id: string; type: string; data?: { config?: Record<string, unknown> } },
+  incoming: Array<{ source: string; targetHandle?: string }>,
+  outputs: Map<string, unknown>,
+  job: Job,
+): Promise<Record<string, unknown>> {
+  const cfg = (node.data?.config ?? {}) as Record<string, unknown>;
+
+  if (node.type === 'prompt' || node.type === 'prompt_list') {
+    // Pass-through nodes — just emit their text.
+    const text = resolvePrompt(node, incoming, outputs) || (cfg.text as string) || '';
+    return node.type === 'prompt_list'
+      ? { textList: text.split('\n').filter((l) => l.trim().length > 0), text }
+      : { text };
+  }
+
+  if (node.type === 'generate_image') {
+    const { runGenerateImageNode } = await import('../plugins/builder/generate-image.js');
+    const prompt = resolvePrompt(node, incoming, outputs);
+    const out = await runGenerateImageNode({
+      prompt,
+      config: {
+        ratio: cfg.ratio as string | undefined,
+        quantity: cfg.quantity as number | undefined,
+        quality: cfg.quality as string | undefined,
+        imageModel: cfg.imageModel as string | undefined,
+      },
+      userId: job.user_id,
+      jobId: job.id,
+    });
+    return { ...out, image: out.media[0]?.url };
+  }
+
+  if (node.type === 'download') {
+    // Pass-through — collect upstream media into a flat list.
+    const collected: Array<{ url: string; kind: string }> = [];
+    for (const e of incoming) {
+      const up = outputs.get(e.source);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const m = (up as any)?.media;
+      if (Array.isArray(m)) collected.push(...m);
+    }
+    return { media: collected };
+  }
+
+  // Everything else — fall back to the placeholder so the run still finishes.
+  // Sprint 11+ wires these to real APIs (generate_video, gemini_prompt, etc.).
+  if (STUB_GENERATOR_TYPES.has(node.type)) {
+    await new Promise((r) => setTimeout(r, 800));
+    return buildStubOutput(node.type);
+  }
+  return { ok: true };
 }
 
 function buildStubOutput(type: string): Record<string, unknown> {
