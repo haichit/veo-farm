@@ -185,8 +185,7 @@ export class TokenManager {
     if (this._bearerToken) return this._bearerToken;
     if (!this._page) throw new Error('TokenManager not launched');
 
-    // Try to provoke an authenticated request — clicking the user menu often
-    // refreshes the session check XHR. Falls back to a no-op evaluate.
+    // Strategy 1: provoke an XHR by clicking user-menu (cheap if it works).
     try {
       await this._page.evaluate(() => {
         const d = (globalThis as any).document;
@@ -208,11 +207,37 @@ export class TokenManager {
       // ignore
     }
 
-    // Wait up to 15s for a request to populate the token.
-    const start = Date.now();
+    // Wait up to 5s for a request to populate the token.
+    let start = Date.now();
+    while (Date.now() - start < 5_000) {
+      if (this._bearerToken) return this._bearerToken;
+      await sleep(300);
+    }
+
+    // Strategy 2: force-navigate to /fx/vi/tools/flow. The SPA bootstrap
+    // ALWAYS makes an authenticated XHR to aisandbox-pa for project list,
+    // which the interceptor catches. This is more reliable than provoking
+    // a click on a UI element that may have moved or not be present.
+    try {
+      const url = this._page.url();
+      if (!/labs\.google\/fx\/.*\/tools\/flow/.test(url)) {
+        await this._page.goto(LABS_BASE + '/fx/vi/tools/flow', {
+          waitUntil: 'domcontentloaded',
+          timeout: 60_000,
+        });
+      } else {
+        // Already on the flow page — force a soft reload via SPA router.
+        await this._page.reload({ waitUntil: 'domcontentloaded', timeout: 60_000 });
+      }
+    } catch {
+      // ignore — fall through to wait loop
+    }
+
+    // Wait up to another 15s for the bootstrap auth XHR.
+    start = Date.now();
     while (Date.now() - start < 15_000) {
       if (this._bearerToken) return this._bearerToken;
-      await sleep(500);
+      await sleep(300);
     }
     throw new Error('Failed to extract Bearer token from labs.google requests');
   }
