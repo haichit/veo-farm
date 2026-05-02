@@ -271,12 +271,10 @@ export function BuilderCanvas() {
         maxZoom={2}
         proOptions={{ hideAttribution: true }}
         deleteKeyCode={['Backspace', 'Delete']}
-        // Left-click + drag on empty canvas now box-selects nodes (instead
-        // of panning) — matches the user's expectation. Pan still works via
-        // middle-click drag, right-click drag, or Alt + drag.
-        selectionOnDrag
-        panOnDrag={[1, 2]}
-        selectionKeyCode={null}
+        // Left-drag pans the canvas (default). Hold Shift while dragging
+        // on empty canvas to box-select nodes. Cmd/Ctrl+click toggles a
+        // node into the current selection.
+        selectionKeyCode="Shift"
         multiSelectionKeyCode={['Meta', 'Control']}
         nodesDraggable
         nodesConnectable
