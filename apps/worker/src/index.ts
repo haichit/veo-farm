@@ -86,6 +86,27 @@ async function resetStuckJobs() {
   }
 }
 
+// Mirror of resetStuckJobs but for accounts. If a previous worker crashed
+// mid-generation, the account it claimed stays at status='busy' and
+// claimAccount round-robins past it forever. Reset busy → idle on boot.
+async function resetStuckAccounts() {
+  const { data, error } = await supabase()
+    .from('accounts')
+    .update({ status: 'idle' })
+    .eq('status', 'busy')
+    .select('id, label');
+  if (error) {
+    logger.warn({ err: error.message }, 'reset stuck accounts failed');
+    return;
+  }
+  if (data && data.length > 0) {
+    logger.info(
+      { count: data.length, accounts: data.map((a) => a.label ?? a.id) },
+      'reset stuck busy accounts',
+    );
+  }
+}
+
 async function heartbeat() {
   // Local marker for Docker HEALTHCHECK (mtime-based liveness probe).
   try {
@@ -164,6 +185,7 @@ async function main() {
   }
   checkSystemDeps();
   await resetStuckJobs();
+  await resetStuckAccounts();
   await heartbeat();
   setInterval(heartbeat, HEARTBEAT_INTERVAL);
 
