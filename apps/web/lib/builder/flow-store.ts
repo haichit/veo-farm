@@ -321,6 +321,9 @@ export const useFlowStore = create<FlowStoreState>((set, get) => ({
           status: 'idle',
           progress: undefined,
           error: undefined,
+          // Also clear stale previews so a re-run starts clean instead of
+          // showing the previous run's image until the new one overwrites.
+          previewMedia: undefined,
         },
       })),
       stats: { done: 0, wait: 0, err: 0 },

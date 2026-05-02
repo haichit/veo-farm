@@ -1,6 +1,6 @@
 'use client';
 
-import { Play, Pause, Square, Image as ImageIcon, ZoomIn } from 'lucide-react';
+import { Play, Pause, Square, Image as ImageIcon, ZoomIn, RotateCcw } from 'lucide-react';
 import { useReactFlow } from '@xyflow/react';
 import { useFlowStore } from '@/lib/builder/flow-store';
 import type { WorkflowJSON } from '@veo-farm/shared';
@@ -141,6 +141,18 @@ export function BuilderToolbar() {
         <Stat label="Chờ" value={stats.wait} variant="wait" />
         <Stat label="Lỗi" value={stats.err} variant="err" />
       </div>
+
+      <button
+        type="button"
+        onClick={() => {
+          resetAllNodeStatus();
+          setCurrentJobId(null);
+        }}
+        title="Xoá kết quả + reset trạng thái mọi node"
+        className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] bg-white/[0.03] border border-border text-text-secondary hover:bg-white/[0.06] hover:text-text-primary transition-colors"
+      >
+        <RotateCcw size={14} /> Reset
+      </button>
 
       <span className="text-[11px] text-text-muted ml-auto mr-3 hidden md:inline">
         Scroll: zoom | Alt+drag: pan | Del: xoá
