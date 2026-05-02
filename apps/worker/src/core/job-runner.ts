@@ -714,12 +714,63 @@ async function executeBuilderNode(
     return { media: collected };
   }
 
-  // Everything else — fall back to the placeholder so the run still finishes.
-  // Sprint 11+ wires these to real APIs (generate_video, gemini_prompt, etc.).
-  if (STUB_GENERATOR_TYPES.has(node.type)) {
-    await new Promise((r) => setTimeout(r, 800));
-    return buildStubOutput(node.type);
+  if (node.type === 'merge_video') {
+    const { runMergeVideoNode } = await import('../plugins/builder/merge-video.js');
+    const urls: string[] = [];
+    for (const e of incoming) {
+      const up = outputs.get(e.source);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const m = (up as any)?.media;
+      if (Array.isArray(m)) {
+        for (const item of m) {
+          if (item?.url && item.kind === 'video') urls.push(item.url);
+        }
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const v = (up as any)?.video;
+      if (typeof v === 'string' && !urls.includes(v)) urls.push(v);
+    }
+    const out = await runMergeVideoNode({ videoUrls: urls, userId: job.user_id, jobId: job.id });
+    return { ...out, video: out.media[0]?.url };
   }
+
+  if (node.type === 'gemini_prompt' || node.type === 'gemini_prompt_kie') {
+    const { runGeminiPromptNode } = await import('../plugins/builder/gemini-prompt.js');
+    const text = resolvePrompt(node, incoming, outputs);
+    const out = await runGeminiPromptNode({
+      text,
+      config: {
+        apiKey: cfg.apiKey as string | undefined,
+        model: cfg.model as string | undefined,
+        promptTemplate: cfg.promptTemplate as string | undefined,
+        useAdditionalText: cfg.useAdditionalText as boolean | undefined,
+        additionalText: cfg.additionalText as string | undefined,
+      },
+    });
+    return { text: out.text };
+  }
+
+  if (node.type === 'upload_image') {
+    // UI lưu data URL trong config.imageUrl khi user click upload trên node.
+    // Worker pass-through: emit URL/data URL thẳng để downstream node dùng.
+    // Generate Video sẽ download (hỗ trợ data URL qua downloadFromUrl) rồi
+    // re-upload lên flow.google.
+    const url = (cfg.imageUrl as string) ?? (cfg.imagePath as string) ?? '';
+    if (!url) throw new Error('upload_image: chưa chọn file nào trong node');
+    return {
+      media: [{ url, kind: 'image' }],
+      image: url,
+      imageUrl: url,
+    };
+  }
+
+  if (node.type === 'frame') {
+    // Visual grouping only — emits nothing. Children nodes execute on their own.
+    return { ok: true };
+  }
+
+  // Unknown type — log + return ok so the run doesn't hard-fail on a typo.
+  logger.warn({ type: node.type }, 'executeBuilderNode: unknown node type, returning ok');
   return { ok: true };
 }
 

@@ -340,21 +340,32 @@ export class ApiClient extends EventEmitter {
 
   async uploadImage(
     source: Buffer | string,
-    mimeType = 'image/jpeg',
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- legacy signature
+    _mimeType: string = 'image/jpeg',
   ): Promise<UploadImageResponse> {
     const buffer = typeof source === 'string' ? fs.readFileSync(source) : source;
+    const projectId = await this._ensureProject();
+    // Body shape lifted from reverse-engineered Flow client v1.5.0:
+    //   { clientContext: { projectId, tool }, imageBytes: <base64> }
+    // Mime is detected server-side from the bytes; passing wrong mime in
+    // the body causes 400 (the bug we just hit). Keep the parameter for
+    // back-compat with callers that pass it but don't send it on the wire.
     const body = {
-      data: buffer.toString('base64'),
-      mimeType,
-      projectId: await this._ensureProject(),
+      clientContext: { projectId, tool: TOOL_NAME },
+      imageBytes: buffer.toString('base64'),
     };
-    const res = await this._apiRequest<UploadImageResponse>(
-      'POST',
-      ENDPOINTS.uploadImage,
-      body,
-    );
-    if (!res.body?.mediaId) throw new Error('uploadImage: no mediaId');
-    return res.body;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await this._apiRequest<any>('POST', ENDPOINTS.uploadImage, body);
+    const mediaId =
+      res.body?.media?.name ??
+      res.body?.mediaId ??
+      res.body?.name;
+    if (!mediaId) {
+      throw new Error(
+        `uploadImage: no mediaId in response: ${JSON.stringify(res.body).slice(0, 300)}`,
+      );
+    }
+    return { mediaId } as UploadImageResponse;
   }
 
   // ─── Private helpers ────────────────────────────────────────────────────

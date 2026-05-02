@@ -24,6 +24,18 @@ export async function uploadBuffer(userId: string, jobId: string, buffer: Buffer
 }
 
 export async function downloadFromUrl(url: string): Promise<Buffer> {
+  // data: URLs (Upload Media node stores image inline as base64) — decode
+  // locally so downstream Generate Video can re-upload to flow.google.
+  if (url.startsWith('data:')) {
+    const commaIdx = url.indexOf(',');
+    if (commaIdx < 0) throw new Error('downloadFromUrl: malformed data URL');
+    const meta = url.slice(5, commaIdx);
+    const payload = url.slice(commaIdx + 1);
+    const isBase64 = /;base64/i.test(meta);
+    return isBase64
+      ? Buffer.from(payload, 'base64')
+      : Buffer.from(decodeURIComponent(payload), 'utf8');
+  }
   const res = await fetch(url);
   if (!res.ok) throw new Error(`download failed ${res.status}: ${url}`);
   const ab = await res.arrayBuffer();
