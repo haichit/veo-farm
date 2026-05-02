@@ -12,7 +12,7 @@ import {
   type Edge,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useFlowStore } from '@/lib/builder/flow-store';
 import { useKeyboardShortcuts } from '@/lib/builder/use-keyboard-shortcuts';
 import { useJobSubscription } from '@/lib/builder/use-job-subscription';
@@ -78,6 +78,47 @@ export function BuilderCanvas() {
   useKeyboardShortcuts();
   useJobSubscription(currentJobId);
 
+  // One-shot migration on mount: any node visually inside a frame but
+  // missing data.frameId gets attached. Covers persisted state from
+  // before the data.frameId mechanism existed so old workflows behave
+  // correctly without making the user re-drag every node.
+  const migrationDoneRef = useRef(false);
+  useEffect(() => {
+    if (migrationDoneRef.current) return;
+    migrationDoneRef.current = true;
+    const all = useFlowStore.getState().nodes;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const frames = all.filter((n: any) => n.type === 'frame');
+    if (frames.length === 0) return;
+    let changed = false;
+    const next = all.map((n) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = n.data as any;
+      if (n.type === 'frame') return n;
+      const cx = n.position.x + (n.width ?? 240) / 2;
+      const cy = n.position.y + (n.height ?? 100) / 2;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const containing = frames.find((f: any) => {
+        const fx = f.position.x;
+        const fy = f.position.y;
+        const fw = f.width ?? f.data?.config?.width ?? 500;
+        const fh = f.height ?? f.data?.config?.height ?? 400;
+        return cx >= fx && cx <= fx + fw && cy >= fy && cy <= fy + fh;
+      });
+      const newFid = containing?.id;
+      if ((data?.frameId ?? undefined) !== newFid) {
+        changed = true;
+        return { ...n, data: { ...data, frameId: newFid } };
+      }
+      return n;
+    });
+    if (changed) {
+      // eslint-disable-next-line no-console
+      console.log('[builder] frame membership migrated for existing nodes');
+      useFlowStore.getState().setNodes(next);
+    }
+  }, []);
+
   const { screenToFlowPosition } = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -91,8 +132,6 @@ export function BuilderCanvas() {
     (e: React.DragEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      // Try sources in order: module ref (most reliable) → custom MIME →
-      // text/plain. Some browsers/extensions strip dataTransfer payloads.
       const raw =
         getDraggedType() ||
         e.dataTransfer.getData(PALETTE_DRAG_MIME) ||
@@ -104,9 +143,28 @@ export function BuilderCanvas() {
         return;
       }
       const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
-      addNode(type, position);
+      const newId = addNode(type, position);
+      // If the drop fell inside an existing frame, attach immediately so
+      // future frame drags carry this node along (onNodeDragStop only fires
+      // on drag, not on palette drop).
+      if (type !== 'frame') {
+        const def = NODE_TYPES[type];
+        const cx = position.x + def.width / 2;
+        const cy = position.y + def.minHeight / 2;
+        const all = useFlowStore.getState().nodes;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const containing = all.find((n: any) => {
+          if (n.type !== 'frame') return false;
+          const fx = n.position.x;
+          const fy = n.position.y;
+          const fw = n.width ?? n.data?.config?.width ?? 500;
+          const fh = n.height ?? n.data?.config?.height ?? 400;
+          return cx >= fx && cx <= fx + fw && cy >= fy && cy <= fy + fh;
+        });
+        if (containing) setNodeParent(newId, containing.id);
+      }
     },
-    [screenToFlowPosition, addNode],
+    [screenToFlowPosition, addNode, setNodeParent],
   );
 
   // After dragging a node, if its centre lands inside any frame, attach it
