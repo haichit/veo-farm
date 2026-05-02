@@ -18,6 +18,7 @@ import { homedir } from 'node:os';
 import { mkdirSync } from 'node:fs';
 import { TokenManager } from './token-manager.js';
 import { CaptchaBridge } from './captcha-bridge.js';
+import { clearProjectIdCache } from './api-client.js';
 import { logger } from '../core/logger.js';
 
 const PROFILES_DIR =
@@ -200,6 +201,7 @@ export async function dropTokenManager(accountId: string): Promise<void> {
   const slot = slots.get(accountId);
   if (!slot) return;
   slots.delete(accountId);
+  clearProjectIdCache(accountId);
   try {
     await slot.tm?.close();
   } catch (e) {

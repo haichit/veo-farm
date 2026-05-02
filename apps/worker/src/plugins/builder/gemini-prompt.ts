@@ -37,7 +37,7 @@ export async function runGeminiPromptNode(
     );
   }
 
-  const model = input.config.model?.trim() || 'gemini-2.0-flash-exp';
+  const model = input.config.model?.trim() || 'gemini-2.5-flash';
   const tmpl = input.config.promptTemplate?.trim() || '{{text}}';
   // Replace placeholder with upstream text. If template has no placeholder
   // but upstream has text, append it (keeps single-shot prompts useful).

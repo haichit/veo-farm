@@ -59,6 +59,15 @@ class ApiError extends Error {
   }
 }
 
+// Module-level cache of projectId per accountId so a 2nd generation on the
+// same warm browser doesn't re-probe a (possibly post-navigation) page that
+// no longer matches /project/<id>/. Cleared by dropTokenManager on error.
+const _projectIdCache = new Map<string, string>();
+export function clearProjectIdCache(accountId?: string): void {
+  if (accountId) _projectIdCache.delete(accountId);
+  else _projectIdCache.clear();
+}
+
 export class ApiClient extends EventEmitter {
   private _sessionId: string;
   private _paygateTier: PaygateTier;
@@ -409,12 +418,23 @@ export class ApiClient extends EventEmitter {
   private async _ensureProject(): Promise<string> {
     if (this._projectId) return this._projectId;
 
+    // Strategy 0: cross-instance cache. Each generate_image / generate_video
+    // call creates a NEW ApiClient even when reusing the warm browser. Once
+    // any client resolves projectId for a session, subsequent ones inherit it
+    // without re-probing the page (which often fails after navigation).
+    const sessionKey = (this.tokenManager as unknown as { _account?: { accountId?: string } })._account?.accountId;
+    if (sessionKey && _projectIdCache.has(sessionKey)) {
+      this._projectId = _projectIdCache.get(sessionKey)!;
+      return this._projectId;
+    }
+
     // Strategy 1: detect existing project from current Brave page URL.
     const page = this.tokenManager._page;
     if (page) {
       const m = page.url().match(/\/project\/([a-f0-9-]{8,})/i);
       if (m) {
         this._projectId = m[1];
+        if (sessionKey) _projectIdCache.set(sessionKey, m[1]);
         return this._projectId;
       }
     }
@@ -439,6 +459,7 @@ export class ApiClient extends EventEmitter {
         }
         if (existingId) {
           this._projectId = existingId;
+          if (sessionKey) _projectIdCache.set(sessionKey, existingId);
           await page
             .goto(`${LABS_BASE}/fx/vi/tools/flow/project/${existingId}`, {
               waitUntil: 'domcontentloaded',

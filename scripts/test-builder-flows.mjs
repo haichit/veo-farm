@@ -59,6 +59,24 @@ const FLOWS = {
     ];
     return { name: 'TEST: text→image→video (FRAME)', nodes, edges, executionOrder: topo(nodes, edges) };
   },
+  gemini: () => {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) { console.error('GEMINI_API_KEY missing'); process.exit(1); }
+    const p = id('prompt'), g = id('gemini'), gi = id('image');
+    const nodes = [
+      { id: p, type: 'prompt', position: { x: 0, y: 0 }, data: { config: { text: 'cat' } } },
+      { id: g, type: 'gemini_prompt', position: { x: 300, y: 0 }, data: { config: {
+        apiKey, model: 'gemini-2.5-flash',
+        promptTemplate: 'Mở rộng prompt sau thành 1 câu mô tả ảnh chi tiết bằng tiếng Anh, dưới 30 từ, không kèm chú thích: {{text}}',
+      } } },
+      { id: gi, type: 'generate_image', position: { x: 600, y: 0 }, data: { config: { ratio: 'landscape', quantity: 1, imageModel: 'nano_banana_2' } } },
+    ];
+    const edges = [
+      { id: 'e1', source: p, target: g, sourceHandle: 'output-0', targetHandle: 'input-0' },
+      { id: 'e2', source: g, target: gi, sourceHandle: 'output-0', targetHandle: 'input-0' },
+    ];
+    return { name: 'TEST: prompt → gemini_prompt → image', nodes, edges, executionOrder: topo(nodes, edges) };
+  },
   merge: () => {
     const p = id('prompt'), v1 = id('video'), v2 = id('video'), m = id('merge');
     const nodes = [

@@ -56,12 +56,17 @@ export class TokenManager {
     const args = [
       '--no-sandbox',
       '--disable-blink-features=AutomationControlled',
-      '--disable-features=IsolateOrigins,site-per-process',
+      // BlockInsecurePrivateNetworkRequests: Chromium's PNA blocks
+      // labs.google → 127.0.0.1:3456 fetch from extension's page-context
+      // socket.io even with CORS+self-signed-trust. Disabling lets the
+      // extension's WebSocket handshake actually reach captcha-server.
+      '--disable-features=IsolateOrigins,site-per-process,BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights,PrivateNetworkAccessRespectPreflightResults',
       `--load-extension=${extPath}`,
       `--disable-extensions-except=${extPath}`,
       // Trust captcha-server's self-signed cert so extension can WS to https://127.0.0.1:3456.
       '--ignore-certificate-errors',
       '--allow-insecure-localhost',
+      '--allow-running-insecure-content',
     ];
 
     const launchOpts: any = {

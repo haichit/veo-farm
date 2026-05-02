@@ -134,11 +134,13 @@ export function NodeEditorPanel() {
             />
             <Select
               label="Model"
-              value={(cfg.model as string) ?? 'gemini-2.0-flash-exp'}
+              value={(cfg.model as string) ?? 'gemini-2.5-flash'}
               onChange={(v) => updateConfig(node.id, { model: v })}
               options={[
-                { value: 'gemini-2.0-flash-exp', label: 'Gemini 2.0 Flash Exp' },
+                { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (recommended)' },
+                { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (slower, higher quality)' },
                 { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+                { value: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash (legacy)' },
               ]}
             />
             <TextEdit
