@@ -16,6 +16,7 @@ const DYNAMIC_PORT_NODES = new Set<BuilderNodeType>([
   'gemini_prompt',
   'gemini_prompt_kie',
   'gemini_vision',
+  'gemini_chat',
   'generate_image',
   'generate_video',
 ]);
@@ -57,7 +58,10 @@ export function getNodeInputPorts(node: NodeForPorts, edges: Edge[]): PortDef[] 
 
   // Port 0: primary text input.
   const textPortName =
-    node.type === 'gemini_prompt' || node.type === 'gemini_prompt_kie' || node.type === 'gemini_vision'
+    node.type === 'gemini_prompt' ||
+    node.type === 'gemini_prompt_kie' ||
+    node.type === 'gemini_vision' ||
+    node.type === 'gemini_chat'
       ? 'text'
       : 'prompt';
 
@@ -66,7 +70,7 @@ export function getNodeInputPorts(node: NodeForPorts, edges: Edge[]): PortDef[] 
   ];
 
   // Ports 1..showSlots: media reference slots.
-  const isVisionNode = node.type === 'gemini_vision';
+  const isVisionNode = node.type === 'gemini_vision' || node.type === 'gemini_chat';
   for (let i = 0; i < showSlots; i++) {
     let portName: string;
     if (isVideoNode && isFrameMode) {
@@ -76,8 +80,8 @@ export function getNodeInputPorts(node: NodeForPorts, edges: Edge[]): PortDef[] 
     } else {
       portName = `ref img ${i + 1}`;
     }
-    // Gemini Vision accepts both image and video — use 'any' colour so
-    // edges from upload_media (video) or generate_image (image) both fit.
+    // Gemini Vision/Chat accept both image and video — use 'any' colour
+    // so edges from upload_media or generate_image both fit.
     const portType = isVisionNode ? 'any' : 'image';
     ports.push({
       name: portName,

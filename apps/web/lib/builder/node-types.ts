@@ -39,6 +39,7 @@ export const BUILDER_NODE_TYPES = [
   'gemini_prompt',
   'gemini_prompt_kie',
   'gemini_vision',
+  'gemini_chat',
   'generate_image',
   'generate_video',
   'merge_video',
@@ -121,6 +122,20 @@ export const NODE_TYPES: Record<BuilderNodeType, NodeTypeDef> = {
     defaults: { apiKey: '', model: 'gemini-2.0-flash-exp', promptTemplate: '' },
     width: 280,
     minHeight: 110,
+  },
+  gemini_chat: {
+    type: 'gemini_chat',
+    label: '🍪 Gemini Chat (Cookies)',
+    category: 'generate',
+    color: '#22d3ee',
+    icon: 'MessageCircle',
+    inputs: [{ name: 'text', type: 'string', color: PORT_COLORS.string, optional: true }],
+    outputs: [{ name: 'text', type: 'string', color: PORT_COLORS.string }],
+    defaults: {
+      promptTemplate: 'Mô tả chi tiết nội dung trong media này.',
+    },
+    width: 280,
+    minHeight: 130,
   },
   gemini_vision: {
     type: 'gemini_vision',
@@ -293,5 +308,6 @@ export const NODE_AVG_RUNTIME_MS: Partial<Record<BuilderNodeType, number>> = {
   gemini_prompt: 6_000,
   gemini_prompt_kie: 6_000,
   gemini_vision: 20_000,
+  gemini_chat: 30_000,
   merge_video: 12_000,
 };

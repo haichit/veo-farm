@@ -784,6 +784,37 @@ async function executeBuilderNode(
     return { ...out, video: out.media[0]?.url };
   }
 
+  if (node.type === 'gemini_chat') {
+    const { runGeminiChatNode } = await import('../plugins/builder/gemini-chat.js');
+    const text = resolvePrompt(node, incoming, outputs);
+    const mediaUrls: Array<{ url: string; kind: 'image' | 'video' }> = [];
+    for (const e of incoming) {
+      if (!e.targetHandle || e.targetHandle === 'input-0') continue;
+      const up = outputs.get(e.source);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const o = up as any;
+      if (Array.isArray(o?.media)) {
+        for (const m of o.media) {
+          if (m?.url) mediaUrls.push({ url: m.url, kind: m.kind === 'video' ? 'video' : 'image' });
+        }
+      } else if (typeof o?.image === 'string') {
+        mediaUrls.push({ url: o.image, kind: 'image' });
+      } else if (typeof o?.video === 'string') {
+        mediaUrls.push({ url: o.video, kind: 'video' });
+      }
+    }
+    const out = await runGeminiChatNode({
+      text,
+      mediaUrls,
+      config: {
+        promptTemplate: cfg.promptTemplate as string | undefined,
+        manualOutput: cfg.manualOutput as string | undefined,
+      },
+      userId: job.user_id,
+    });
+    return { text: out.text };
+  }
+
   if (node.type === 'gemini_vision') {
     const { runGeminiVisionNode } = await import('../plugins/builder/gemini-vision.js');
     const text = resolvePrompt(node, incoming, outputs);

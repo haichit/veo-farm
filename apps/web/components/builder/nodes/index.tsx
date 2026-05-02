@@ -8,6 +8,7 @@ import { UploadMediaNode } from './UploadMediaNode';
 import { GeminiPromptNode } from './GeminiPromptNode';
 import { GeminiPromptKieNode } from './GeminiPromptKieNode';
 import { GeminiVisionNode } from './GeminiVisionNode';
+import { GeminiChatNode } from './GeminiChatNode';
 import { GenerateImageNode } from './GenerateImageNode';
 import { GenerateVideoNode } from './GenerateVideoNode';
 import { MergeVideoNode } from './MergeVideoNode';
@@ -21,6 +22,7 @@ export const customNodeTypes: NodeTypes = {
   gemini_prompt: GeminiPromptNode,
   gemini_prompt_kie: GeminiPromptKieNode,
   gemini_vision: GeminiVisionNode,
+  gemini_chat: GeminiChatNode,
   generate_image: GenerateImageNode,
   generate_video: GenerateVideoNode,
   merge_video: MergeVideoNode,
