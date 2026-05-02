@@ -82,6 +82,17 @@ export function useWorkflowRun() {
         }
         return out;
       };
+      const defaultGemini = useFlowStore.getState().defaultGeminiApiKey;
+      const withDefaultKey = (type: string, cfg: Record<string, unknown>): Record<string, unknown> => {
+        if (
+          (type === 'gemini_prompt' || type === 'gemini_vision') &&
+          !((cfg.apiKey as string | undefined)?.trim()) &&
+          defaultGemini
+        ) {
+          return { ...cfg, apiKey: defaultGemini };
+        }
+        return cfg;
+      };
       const workflow: WorkflowJSON = {
         version: '1.0',
         name: currentWorkflowName,
@@ -89,7 +100,13 @@ export function useWorkflowRun() {
           id: n.id,
           type: n.type ?? 'prompt',
           position: n.position,
-          data: { config: safeConfig((n.data?.config ?? {}) as Record<string, unknown>), label: n.data?.label },
+          data: {
+            config: withDefaultKey(
+              n.type ?? 'prompt',
+              safeConfig((n.data?.config ?? {}) as Record<string, unknown>),
+            ),
+            label: n.data?.label,
+          },
           width: n.width,
           height: n.height,
         })),

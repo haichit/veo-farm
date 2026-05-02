@@ -18,7 +18,11 @@ export function GeminiPromptNode(props: NodeProps) {
   const data = props.data as BuilderNodeData;
   const lastOutput = data?.lastOutputText ?? '';
   const status = data?.status ?? 'idle';
-  const hasApiKey = !!cfg.apiKey;
+  const defaultKey = useFlowStore((s) => s.defaultGeminiApiKey);
+  // Effective key: per-node value wins, fall back to global default the
+  // user pasted into another gemini node. Workflow runner does the same
+  // substitution on POST so worker receives a non-empty key.
+  const hasApiKey = !!(cfg.apiKey?.trim() || defaultKey);
   const usingManual = !!cfg.manualOutput?.trim();
 
   return (

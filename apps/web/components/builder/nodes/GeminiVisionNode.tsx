@@ -19,7 +19,8 @@ export function GeminiVisionNode(props: NodeProps) {
   const data = props.data as BuilderNodeData;
   const lastOutput = data?.lastOutputText ?? '';
   const status = data?.status ?? 'idle';
-  const hasApiKey = !!cfg.apiKey;
+  const defaultKey = useFlowStore((s) => s.defaultGeminiApiKey);
+  const hasApiKey = !!(cfg.apiKey?.trim() || defaultKey);
   const usingManual = !!cfg.manualOutput?.trim();
 
   return (
