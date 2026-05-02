@@ -17,6 +17,7 @@ import path from 'node:path';
 import { homedir } from 'node:os';
 import { mkdirSync } from 'node:fs';
 import { TokenManager } from './token-manager.js';
+import { CaptchaBridge } from './captcha-bridge.js';
 import { logger } from '../core/logger.js';
 
 const PROFILES_DIR =
@@ -120,6 +121,12 @@ export async function acquireTokenManager(opts: AcquireOptions): Promise<Acquire
     logger.info({ accountId: opts.accountId }, 'browser-pool: reusing warm browser');
   }
 
+  // Pre-flight extension check — extension's WebSocket to captcha-server can
+  // drop after long idle. If the server reports zero connected clients, force
+  // a page reload so the content-script reinjects and re-handshakes BEFORE
+  // we hand the lease to the caller.
+  await ensureCaptchaClientConnected(slot.tm, opts.accountId);
+
   slot.inFlight += 1;
   slot.lastUsed = Date.now();
 
@@ -131,6 +138,57 @@ export async function acquireTokenManager(opts: AcquireOptions): Promise<Acquire
       releaseLock();
     },
   };
+}
+
+async function ensureCaptchaClientConnected(
+  tm: TokenManager,
+  accountId: string,
+): Promise<void> {
+  const captchaUrl = process.env.CAPTCHA_SERVER_URL ?? 'https://127.0.0.1:3456';
+  const bridge = new CaptchaBridge(captchaUrl);
+  let health: { connectedClients: number } | undefined;
+  try {
+    health = await bridge.health();
+  } catch {
+    // Server unreachable — nothing to verify, let the caller hit it directly.
+    return;
+  }
+  if ((health?.connectedClients ?? 0) > 0) return;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const page = (tm as any)._page;
+  if (!page) return;
+
+  logger.warn(
+    { accountId },
+    'browser-pool: captcha-server has 0 clients, reloading labs.google to force extension reinject',
+  );
+  try {
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 60_000 });
+  } catch (e) {
+    logger.warn(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      { accountId, err: (e as any)?.message ?? e },
+      'browser-pool: page.reload failed during extension recovery',
+    );
+    return;
+  }
+
+  // Wait up to 15s for extension to reconnect.
+  const start = Date.now();
+  while (Date.now() - start < 15_000) {
+    try {
+      const h = await bridge.health();
+      if ((h?.connectedClients ?? 0) > 0) {
+        logger.info({ accountId, ms: Date.now() - start }, 'browser-pool: extension reconnected');
+        return;
+      }
+    } catch {
+      /* keep polling */
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  logger.warn({ accountId }, 'browser-pool: extension still disconnected after reload — request will likely fail');
 }
 
 /**
