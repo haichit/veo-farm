@@ -199,68 +199,89 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
       } catch { /* ignore */ }
 
       if (!inputAlreadyThere) {
-        // Step 1: click the "+" / attach / Tools button. Try a chain of
-        // selectors covering current + recent Gemini UIs.
+        // Step 1: click the upload button via real mouse event (Angular
+        // Material listens to pointerdown/pointerup, NOT synthetic .click()).
+        // Selector chain — confirmed by DOM dump 2026-05-03: aria-label
+        // "Open upload file menu" + aria-controls="upload-file-menu".
         const plusBtnSelectors = [
+          'button[aria-controls="upload-file-menu"]',
+          'button.upload-card-button',
+          'button[aria-label="Open upload file menu"]',
           'button[aria-label*="upload" i]',
           'button[aria-label*="attach" i]',
-          'button[aria-label*="add files" i]',
           'button[aria-label*="thêm" i]',
           'button[aria-label*="đính kèm" i]',
           'button[aria-label*="tải" i]',
-          'button[aria-label*="công cụ" i]',
-          'button[aria-label*="tools" i]',
-          'toolbox-drawer-item button',
-          'uploader button',
           'button[data-test-id="upload-trigger"]',
-          'button[data-test-id="uploader-button"]',
-          'button mat-icon[fonticon="add"]',
-          'button mat-icon[fonticon="add_2"]',
-          'mat-icon[data-mat-icon-name="add"]',
         ];
-        let clicked = false;
+        let clickedSel = '';
         for (const sel of plusBtnSelectors) {
           try {
             const btn = await page.$(sel);
             if (btn) {
-              await btn.evaluate((el: Element) => {
-                const target = (el as HTMLElement).closest('button') ?? (el as HTMLElement);
-                (target as HTMLElement).click();
-              });
-              clicked = true;
-              await new Promise((r) => setTimeout(r, 400));
+              await btn.click({ delay: 50 });
+              clickedSel = sel;
               break;
             }
           } catch { /* try next */ }
         }
-        logger.info({ clicked }, 'gemini_chat: plus button click result');
+        logger.info({ clickedSel }, 'gemini_chat: plus button click result');
 
-        // Step 2: a menu/popup may have opened. Click any item that says
-        // "Upload file" / "Tải tệp" / "Files" / "From this device".
-        const menuItemKeywords = [
-          'upload', 'tải lên', 'tải tệp', 'tệp tin', 'từ thiết bị', 'from this device',
-          'files', 'tệp', 'tải file',
-        ];
+        if (!clickedSel) {
+          throw new Error('gemini_chat: không tìm thấy nút upload trên Gemini UI.');
+        }
+
+        // Step 2: wait for the menu to open. The button toggles
+        // aria-expanded="true" when its mat-menu materialises.
         try {
-          await page.evaluate((keywords: string[]) => {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const doc: any = (globalThis as any).document;
-            const candidates: HTMLElement[] = [
-              ...doc.querySelectorAll('[role="menuitem"], button, [role="option"], li[role="option"], [mat-menu-item]'),
-            ] as HTMLElement[];
-            for (const el of candidates) {
-              const text = (el.innerText || el.textContent || '').toLowerCase();
-              if (!text) continue;
-              for (const k of keywords) {
-                if (text.includes(k)) {
+          await page.waitForFunction(
+            (sel: string) => {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const doc: any = (globalThis as any).document;
+              const b = doc.querySelector(sel);
+              return b && b.getAttribute('aria-expanded') === 'true';
+            },
+            { timeout: 4000 },
+            clickedSel,
+          );
+        } catch { /* fall through — menu may have opened without aria flag */ }
+        await new Promise((r) => setTimeout(r, 300));
+
+        // Step 3: click the menu item that opens the file picker. Gemini
+        // currently labels this "Tệp" / "Files" / "Upload files from device".
+        // Skip Drive/Photos items (cloud picker triggers a different dialog).
+        const menuItemKeywords = [
+          'upload files', 'upload file', 'tải tệp lên', 'tải lên tệp',
+          'tải tệp', 'tệp từ thiết bị', 'from this device', 'từ thiết bị',
+          'tệp', 'files',
+        ];
+        const skipKeywords = ['drive', 'photos', 'ảnh google', 'ảnh từ', 'youtube'];
+        try {
+          const menuClicked = await page.evaluate(
+            (keywords: string[], skips: string[]) => {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const doc: any = (globalThis as any).document;
+              const candidates: HTMLElement[] = [
+                ...doc.querySelectorAll(
+                  '[role="menuitem"], [mat-menu-item], button[role="menuitem"], .mat-mdc-menu-item, .mat-menu-item',
+                ),
+              ] as HTMLElement[];
+              for (const el of candidates) {
+                const text = (el.innerText || el.textContent || '').toLowerCase().trim();
+                if (!text) continue;
+                if (skips.some((s) => text.includes(s))) continue;
+                if (keywords.some((k) => text.includes(k))) {
                   el.click();
-                  return true;
+                  return text.slice(0, 50);
                 }
               }
-            }
-            return false;
-          }, menuItemKeywords);
-          await new Promise((r) => setTimeout(r, 400));
+              return null;
+            },
+            menuItemKeywords,
+            skipKeywords,
+          );
+          logger.info({ menuClicked }, 'gemini_chat: upload menu item');
+          if (menuClicked) await new Promise((r) => setTimeout(r, 500));
         } catch { /* ignore */ }
       }
 
