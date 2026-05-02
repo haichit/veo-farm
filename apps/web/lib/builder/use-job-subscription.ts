@@ -4,16 +4,18 @@ import { useEffect } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { useFlowStore, type NodeStatus, type PreviewMedia } from './flow-store';
 
-// Subscribes to Supabase Realtime updates for a Builder job and bridges them
-// into the flow store. Mounted by the canvas page when currentJobId !== null.
+// Mirror a Builder job into the flow store using **always-on polling** plus
+// (optionally) Supabase Realtime for snappier updates.
 //
-// Channel listens to:
-//   - sub_jobs UPDATE/INSERT  → per-node status + previewMedia
-//   - jobs UPDATE             → aggregated stats + run state transitions
+// Why polling-first instead of subscription-first: Realtime requires the
+// publication ALTER TABLE migration to land AND the user's session JWT to
+// be attached to the channel. Either failing leaves the UI stuck even
+// though the worker happily wrote the result. Polling the REST API uses
+// the same auth cookie as every other fetch on the page and is impossible
+// to misconfigure — once we have working SELECT, we have working updates.
 //
-// Also runs an initial SELECT pass so any rows the worker wrote between job
-// creation and the subscription becoming active aren't missed (Realtime only
-// streams events after .subscribe() resolves).
+// Realtime stays on as a bonus channel: when it works the UI updates
+// within ~50ms instead of waiting up to 1s for the next poll tick.
 export function useJobSubscription(jobId: string | null) {
   const updateNodeStatus = useFlowStore((s) => s.updateNodeStatus);
   const setNodePreview = useFlowStore((s) => s.setNodePreview);
@@ -25,6 +27,10 @@ export function useJobSubscription(jobId: string | null) {
     const sb = createSupabaseBrowserClient();
     let pollTimer: ReturnType<typeof setInterval> | null = null;
     let cancelled = false;
+    // Track which sub_jobs we've already pushed previewMedia for so polling
+    // doesn't keep appending the same items to the album every tick.
+    const seenMediaForNode = new Set<string>();
+    let lastJobStatus = '';
 
     function applySubJob(row: {
       node_id?: string;
@@ -37,34 +43,62 @@ export function useJobSubscription(jobId: string | null) {
         error: row.error ?? undefined,
       });
       const media = extractMedia(row.output);
-      if (media.length > 0) setNodePreview(row.node_id, media);
+      if (media.length > 0 && !seenMediaForNode.has(row.node_id)) {
+        seenMediaForNode.add(row.node_id);
+        setNodePreview(row.node_id, media);
+      }
     }
 
     function applyJob(row: { status?: string; stats?: { done: number; wait: number; err: number } }) {
       if (row?.stats) setStats(row.stats);
-      if (row?.status === 'completed') setRunState('idle');
-      else if (row?.status === 'failed') setRunState('idle');
-      else if (row?.status === 'cancelled') setRunState('stopped');
-      else if (row?.status === 'paused') setRunState('paused');
-      else if (row?.status === 'running') setRunState('running');
+      const status = row?.status ?? '';
+      if (status === lastJobStatus) return;
+      lastJobStatus = status;
+      if (status === 'completed' || status === 'failed') setRunState('idle');
+      else if (status === 'cancelled') setRunState('stopped');
+      else if (status === 'paused') setRunState('paused');
+      else if (status === 'running') setRunState('running');
     }
 
-    async function pollOnce() {
-      const [{ data: subRows }, { data: jobRow }] = await Promise.all([
+    async function pollOnce(): Promise<string | null> {
+      const [{ data: subRows, error: subErr }, { data: jobRow, error: jobErr }] = await Promise.all([
         sb.from('sub_jobs').select('node_id, status, error, output').eq('job_id', jobId),
         sb.from('jobs').select('status, stats').eq('id', jobId).single(),
       ]);
-      if (cancelled) return;
+      if (cancelled) return null;
+      if (subErr || jobErr) {
+        // eslint-disable-next-line no-console
+        console.warn('[builder] poll error', { subErr, jobErr });
+      }
       // eslint-disable-next-line
       if (subRows) for (const r of subRows) applySubJob(r as any);
       // eslint-disable-next-line
       if (jobRow) applyJob(jobRow as any);
+      // eslint-disable-next-line
+      return (jobRow as any)?.status ?? null;
     }
 
-    // Pull current state straight away so completed runs reflect even if
-    // Realtime hasn't acknowledged the subscription yet.
-    void pollOnce();
+    function isTerminal(status: string | null): boolean {
+      return status === 'completed' || status === 'failed' || status === 'cancelled';
+    }
 
+    async function pollLoop() {
+      const status = await pollOnce();
+      if (cancelled) return;
+      if (isTerminal(status)) {
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+      }
+    }
+
+    // Always poll — first tick now, then every second until terminal.
+    void pollLoop();
+    pollTimer = setInterval(() => void pollLoop(), 1000);
+
+    // Realtime bonus channel — speeds updates up but the UI does not
+    // depend on it.
     const channel = sb
       .channel(`job:${jobId}`)
       .on(
@@ -83,16 +117,7 @@ export function useJobSubscription(jobId: string | null) {
           applyJob(payload.new as any);
         },
       )
-      .subscribe((status) => {
-        // Fallback poll: if Realtime never connects (CORS / publication
-        // missing / network), poll every 1.5s until job leaves "running".
-        if (status !== 'SUBSCRIBED' && !pollTimer) {
-          pollTimer = setInterval(() => void pollOnce(), 1500);
-        } else if (status === 'SUBSCRIBED' && pollTimer) {
-          clearInterval(pollTimer);
-          pollTimer = null;
-        }
-      });
+      .subscribe();
 
     return () => {
       cancelled = true;
