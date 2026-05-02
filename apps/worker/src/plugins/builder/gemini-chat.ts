@@ -391,24 +391,50 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
         } catch { /* fall through — menu may have opened without aria flag */ }
         await new Promise((r) => setTimeout(r, 300));
 
-        // Step 3: click the menu item that opens the file picker. Gemini
-        // exposes a stable hook: data-test-id="local-images-files-uploader-button"
-        // — confirmed in DOM dump 2026-05-03. Try that exact selector first
-        // via real mouse click (Angular Material menu items also need real
-        // pointer events). Fall back to text/icon heuristics.
+        // Step 3: prepare files on disk + intercept the native file picker.
+        // Gemini's "Upload files" menu item triggers an OS-level file dialog
+        // (NOT a hidden input.setInputFiles). Puppeteer can hook this with
+        // page.waitForFileChooser BEFORE the click — when the menu fires
+        // the picker, the chooser handle becomes available and we feed our
+        // pre-downloaded files into it programmatically. No native dialog
+        // ever surfaces to the user.
+
+        // Download the upstream media URLs to /tmp first so they're ready
+        // to pass into the chooser the moment it opens.
+        const tmpFiles: string[] = [];
+        for (const m of input.mediaUrls) {
+          const buf = await downloadFromUrl(m.url);
+          const ext = m.kind === 'video' ? 'mp4' : 'png';
+          const f = path.join(
+            '/tmp',
+            `gemini-chat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`,
+          );
+          writeFileSync(f, buf);
+          tmpFiles.push(f);
+        }
+        logger.info({ files: tmpFiles.length }, 'gemini_chat: media downloaded, opening file chooser');
+
+        // Race: wait for either the chooser OR the file input to appear.
+        // Whichever comes first determines the upload path.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const chooserPromise = (page as any).waitForFileChooser({ timeout: 12_000 }).catch(() => null);
+        const inputPromise = page
+          .waitForSelector(fileInputSel, { timeout: 12_000 })
+          .catch(() => null);
+
+        // Click the menu item AFTER the chooser listener is attached.
         try {
           const exactSel = '[data-test-id="local-images-files-uploader-button"]';
           const exact = await page.$(exactSel);
           if (exact) {
             await exact.click({ delay: 50 });
             logger.info({ via: 'data-test-id' }, 'gemini_chat: upload menu item clicked');
-            await new Promise((r) => setTimeout(r, 500));
           } else {
-            // Fallback: scan menu items for the right label / icon.
+            // Fallback: click any menu item carrying the attach_file icon
+            // or matching the upload-files label.
             const menuItemKeywords = [
               'upload files', 'upload file', 'tải tệp lên', 'tải lên tệp',
               'tải tệp', 'tệp từ thiết bị', 'from this device', 'từ thiết bị',
-              'tệp', 'files',
             ];
             const skipKeywords = ['drive', 'photos', 'ảnh google', 'ảnh từ', 'youtube'];
             const menuClicked = await page.evaluate(
@@ -421,8 +447,6 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
                   ),
                 ] as HTMLElement[];
                 for (const el of candidates) {
-                  // Prefer the "attach_file" icon — that's always the local
-                  // file uploader item.
                   if (el.querySelector('[fonticon="attach_file"]')) {
                     el.click();
                     return 'icon:attach_file';
@@ -441,41 +465,49 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
               skipKeywords,
             );
             logger.info({ menuClicked }, 'gemini_chat: upload menu item (fallback)');
-            if (menuClicked) await new Promise((r) => setTimeout(r, 500));
           }
         } catch { /* ignore */ }
+
+        // Race: chooser usually wins for Gemini's current UI.
+        const [chooser, inputHandle] = await Promise.all([chooserPromise, inputPromise]);
+        if (chooser) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (chooser as any).accept(tmpFiles);
+          logger.info({ files: tmpFiles.length }, 'gemini_chat: files fed to native file chooser');
+        } else if (inputHandle) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (inputHandle as any).uploadFile(...tmpFiles);
+          logger.info({ files: tmpFiles.length }, 'gemini_chat: files attached via input element');
+        } else {
+          // Neither path materialised — dump and throw.
+          try {
+            const html = await page.content();
+            const debugFile = `/tmp/gemini-chat-upload-debug-${Date.now()}.html`;
+            writeFileSync(debugFile, html);
+            logger.warn({ debugFile }, 'gemini_chat: chooser/input never appeared — DOM dumped');
+          } catch { /* ignore */ }
+          throw new Error(
+            'gemini_chat: Upload files menu không trigger được file chooser. Có thể do Gemini UI thay đổi — tạm dùng node Gemini Vision (API) thay thế.',
+          );
+        }
+      } else {
+        // Pre-existing input[type=file] in DOM — direct upload path.
+        const tmpFiles: string[] = [];
+        for (const m of input.mediaUrls) {
+          const buf = await downloadFromUrl(m.url);
+          const ext = m.kind === 'video' ? 'mp4' : 'png';
+          const f = path.join('/tmp', `gemini-chat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`);
+          writeFileSync(f, buf);
+          tmpFiles.push(f);
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const inputElems = await page.$$(fileInputSel);
+        const fileInput = inputElems[inputElems.length - 1] ?? inputElems[0];
+        await fileInput.uploadFile(...tmpFiles);
+        logger.info({ files: tmpFiles.length }, 'gemini_chat: files attached via existing input');
       }
 
-      // Step 3: now the file input should be in the DOM.
-      try {
-        await page.waitForSelector(fileInputSel, { timeout: 15_000 });
-      } catch (e) {
-        // Dump HTML for debugging next time the UI changes.
-        try {
-          const html = await page.content();
-          const debugFile = `/tmp/gemini-chat-upload-debug-${Date.now()}.html`;
-          writeFileSync(debugFile, html);
-          logger.warn({ debugFile }, 'gemini_chat: file input not found — DOM dumped');
-        } catch { /* ignore */ }
-        throw new Error(
-          'gemini_chat: không tìm thấy nút upload file trên Gemini UI. UI có thể đã thay đổi — báo lại để cập nhật selector. Tạm thời dùng node Gemini Vision (API) cho hỗ trợ media.',
-        );
-      }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const inputElems = await page.$$(fileInputSel);
-      const fileInput = inputElems[inputElems.length - 1] ?? inputElems[0];
-
-      // Download every media URL to /tmp and feed to setInputFiles.
-      const tmpFiles: string[] = [];
-      for (const m of input.mediaUrls) {
-        const buf = await downloadFromUrl(m.url);
-        const ext = m.kind === 'video' ? 'mp4' : 'png';
-        const f = path.join('/tmp', `gemini-chat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`);
-        writeFileSync(f, buf);
-        tmpFiles.push(f);
-      }
-      await fileInput.uploadFile(...tmpFiles);
-      // Wait for upload progress to finish — heuristic: spinner gone.
+      // Wait for Gemini's upload progress to settle (server-side processing).
       await new Promise((r) => setTimeout(r, 6000));
     }
 
