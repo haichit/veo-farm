@@ -190,6 +190,47 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
     if (input.mediaUrls && input.mediaUrls.length > 0) {
       logger.info({ count: input.mediaUrls.length }, 'gemini_chat: attaching media');
 
+      // Verify the page actually finished loading before probing the DOM —
+      // page.goto returns on domcontentloaded but Angular's shell may still
+      // be mounting. Wait for the upload trigger or sign-in button to be
+      // present before deciding which path to take.
+      try {
+        await page.waitForFunction(
+          () => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const doc: any = (globalThis as any).document;
+            const uploadBtn =
+              doc.querySelector('button[aria-controls="upload-file-menu"]') ||
+              doc.querySelector('button.upload-card-button') ||
+              doc.querySelector('button[aria-label*="upload" i]') ||
+              doc.querySelector('input[type="file"]');
+            const signInBtn =
+              doc.querySelector('button.sign-in-button') ||
+              doc.querySelector('a[href*="ServiceLogin"]');
+            return !!(uploadBtn || signInBtn);
+          },
+          { timeout: 20_000 },
+        );
+      } catch {
+        /* fall through — let downstream probe report the real state */
+      }
+
+      // Detect logged-out state up-front, before chasing missing selectors.
+      const isLoggedOut = await page.evaluate(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const doc: any = (globalThis as any).document;
+        return !!(
+          doc.querySelector('button.sign-in-button') ||
+          doc.querySelector('a[href*="ServiceLogin"]') ||
+          doc.querySelector('a[href*="accounts.google.com"]')
+        );
+      });
+      if (isLoggedOut) {
+        throw new Error(
+          'gemini_chat: Gemini chưa login (page có nút "Sign in"). Cookies hết hạn — vào /accounts cập nhật lại cookies cho account loại "gemini" hoặc "veo3", hoặc paste cookies mới vào field "Gemini Cookies" trong node.',
+        );
+      }
+
       const fileInputSel = 'input[type="file"]';
       // If file input already mounted, skip menu navigation.
       let inputAlreadyThere = false;
