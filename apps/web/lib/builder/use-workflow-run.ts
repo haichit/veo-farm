@@ -26,6 +26,22 @@ export function useWorkflowRun() {
       }
       resetAllNodeStatus();
       setRunState('running');
+      // Defensive — if any node still holds a giant data: URL (from before
+      // /api/upload-media existed), the Postgres INSERT will time out. Drop
+      // them and warn the user to re-upload.
+      let stripped = 0;
+      const safeConfig = (cfg: Record<string, unknown>): Record<string, unknown> => {
+        const out: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(cfg ?? {})) {
+          if (typeof v === 'string' && v.startsWith('data:') && v.length > 100_000) {
+            out[k] = '';
+            stripped += 1;
+          } else {
+            out[k] = v;
+          }
+        }
+        return out;
+      };
       const workflow: WorkflowJSON = {
         version: '1.0',
         name: currentWorkflowName,
@@ -33,7 +49,7 @@ export function useWorkflowRun() {
           id: n.id,
           type: n.type ?? 'prompt',
           position: n.position,
-          data: { config: n.data?.config ?? {}, label: n.data?.label },
+          data: { config: safeConfig((n.data?.config ?? {}) as Record<string, unknown>), label: n.data?.label },
           width: n.width,
           height: n.height,
         })),
@@ -45,6 +61,11 @@ export function useWorkflowRun() {
           targetHandle: e.targetHandle ?? '',
         })),
       };
+      if (stripped > 0) {
+        alert(
+          `Đã loại bỏ ${stripped} file lớn cũ khỏi workflow (data URL). Vui lòng pick lại file qua nút Upload Media — hệ thống mới sẽ upload thẳng lên Storage.`,
+        );
+      }
       const targetNodeIds = Array.isArray(target) ? target : target ? [target] : null;
       try {
         // eslint-disable-next-line no-console
