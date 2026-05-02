@@ -183,20 +183,102 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
     await page.waitForSelector(inputSel, { timeout: 60_000 });
 
     // ─── Optional file uploads ───
-    // Files attach via the + menu → file input. We probe for any file input
-    // on the page and call setInputFiles. Works for image and small video.
+    // Gemini's file input is mounted lazily behind a "+" menu. UI keeps
+    // changing so we cast a wide net: try multiple "plus / attach" buttons,
+    // then click any "Upload file / Tải tệp" menu item if a popup opened,
+    // and finally fall through to looking for an existing input[type=file].
     if (input.mediaUrls && input.mediaUrls.length > 0) {
       logger.info({ count: input.mediaUrls.length }, 'gemini_chat: attaching media');
-      // Click the "+" attach button so the hidden file input mounts.
-      const plusBtnSel =
-        'button[aria-label*="upload" i], button[aria-label*="attach" i], button[aria-label*="thêm" i], button[data-test-id="upload-trigger"]';
-      try {
-        await page.click(plusBtnSel, { timeout: 5000 });
-      } catch {
-        // Some layouts have the input always present — fall through.
-      }
+
       const fileInputSel = 'input[type="file"]';
-      await page.waitForSelector(fileInputSel, { timeout: 10_000 });
+      // If file input already mounted, skip menu navigation.
+      let inputAlreadyThere = false;
+      try {
+        const existing = await page.$(fileInputSel);
+        inputAlreadyThere = !!existing;
+      } catch { /* ignore */ }
+
+      if (!inputAlreadyThere) {
+        // Step 1: click the "+" / attach / Tools button. Try a chain of
+        // selectors covering current + recent Gemini UIs.
+        const plusBtnSelectors = [
+          'button[aria-label*="upload" i]',
+          'button[aria-label*="attach" i]',
+          'button[aria-label*="add files" i]',
+          'button[aria-label*="thêm" i]',
+          'button[aria-label*="đính kèm" i]',
+          'button[aria-label*="tải" i]',
+          'button[aria-label*="công cụ" i]',
+          'button[aria-label*="tools" i]',
+          'toolbox-drawer-item button',
+          'uploader button',
+          'button[data-test-id="upload-trigger"]',
+          'button[data-test-id="uploader-button"]',
+          'button mat-icon[fonticon="add"]',
+          'button mat-icon[fonticon="add_2"]',
+          'mat-icon[data-mat-icon-name="add"]',
+        ];
+        let clicked = false;
+        for (const sel of plusBtnSelectors) {
+          try {
+            const btn = await page.$(sel);
+            if (btn) {
+              await btn.evaluate((el: Element) => {
+                const target = (el as HTMLElement).closest('button') ?? (el as HTMLElement);
+                (target as HTMLElement).click();
+              });
+              clicked = true;
+              await new Promise((r) => setTimeout(r, 400));
+              break;
+            }
+          } catch { /* try next */ }
+        }
+        logger.info({ clicked }, 'gemini_chat: plus button click result');
+
+        // Step 2: a menu/popup may have opened. Click any item that says
+        // "Upload file" / "Tải tệp" / "Files" / "From this device".
+        const menuItemKeywords = [
+          'upload', 'tải lên', 'tải tệp', 'tệp tin', 'từ thiết bị', 'from this device',
+          'files', 'tệp', 'tải file',
+        ];
+        try {
+          await page.evaluate((keywords: string[]) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const doc: any = (globalThis as any).document;
+            const candidates: HTMLElement[] = [
+              ...doc.querySelectorAll('[role="menuitem"], button, [role="option"], li[role="option"], [mat-menu-item]'),
+            ] as HTMLElement[];
+            for (const el of candidates) {
+              const text = (el.innerText || el.textContent || '').toLowerCase();
+              if (!text) continue;
+              for (const k of keywords) {
+                if (text.includes(k)) {
+                  el.click();
+                  return true;
+                }
+              }
+            }
+            return false;
+          }, menuItemKeywords);
+          await new Promise((r) => setTimeout(r, 400));
+        } catch { /* ignore */ }
+      }
+
+      // Step 3: now the file input should be in the DOM.
+      try {
+        await page.waitForSelector(fileInputSel, { timeout: 15_000 });
+      } catch (e) {
+        // Dump HTML for debugging next time the UI changes.
+        try {
+          const html = await page.content();
+          const debugFile = `/tmp/gemini-chat-upload-debug-${Date.now()}.html`;
+          writeFileSync(debugFile, html);
+          logger.warn({ debugFile }, 'gemini_chat: file input not found — DOM dumped');
+        } catch { /* ignore */ }
+        throw new Error(
+          'gemini_chat: không tìm thấy nút upload file trên Gemini UI. UI có thể đã thay đổi — báo lại để cập nhật selector. Tạm thời dùng node Gemini Vision (API) cho hỗ trợ media.',
+        );
+      }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const inputElems = await page.$$(fileInputSel);
       const fileInput = inputElems[inputElems.length - 1] ?? inputElems[0];
