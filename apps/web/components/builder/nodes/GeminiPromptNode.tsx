@@ -52,7 +52,7 @@ export function GeminiPromptNode(props: NodeProps) {
           once OR the user has typed a manual override. Editing the box saves
           to config.manualOutput so the worker skips the Gemini call next run. */}
       {(lastOutput || usingManual || status === 'done') && (
-        <div className="mt-2.5">
+        <div className="flex-1 flex flex-col min-h-0 mt-1">
           <div className="flex items-center justify-between mb-1">
             <span className="text-[10px] uppercase tracking-wider text-text-muted">
               Output {usingManual && <span className="text-accent normal-case">(đã sửa)</span>}
@@ -76,9 +76,8 @@ export function GeminiPromptNode(props: NodeProps) {
             value={cfg.manualOutput ?? lastOutput}
             onChange={(e) => updateConfig(props.id, { manualOutput: e.target.value })}
             onMouseDown={(e) => e.stopPropagation()}
-            rows={3}
             placeholder="(output sẽ hiện ở đây sau khi Run)"
-            className="nodrag nowheel w-full bg-[#0c0c18] border border-success/30 rounded-md p-2 text-[11px] text-text-primary outline-none focus:border-accent resize-none"
+            className="nodrag nowheel flex-1 min-h-[60px] w-full bg-[#0c0c18] border border-success/30 rounded-md p-2 text-[11px] text-text-primary outline-none focus:border-accent resize-none"
           />
         </div>
       )}

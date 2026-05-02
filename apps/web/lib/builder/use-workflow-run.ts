@@ -18,7 +18,7 @@ export function useWorkflowRun() {
   const currentWorkflowName = useFlowStore((s) => s.currentWorkflowName);
 
   const startRun = useCallback(
-    async (targetNodeId?: string) => {
+    async (target?: string | string[]) => {
       const { nodes, edges } = useFlowStore.getState();
       if (nodes.length === 0) {
         alert('Workflow chưa có node nào.');
@@ -45,12 +45,13 @@ export function useWorkflowRun() {
           targetHandle: e.targetHandle ?? '',
         })),
       };
+      const targetNodeIds = Array.isArray(target) ? target : target ? [target] : null;
       try {
         // eslint-disable-next-line no-console
         console.log('[builder] POST /api/run-workflow-builder', {
           nodes: nodes.length,
           edges: edges.length,
-          targetNodeId,
+          targetNodeIds,
         });
         const r = await fetch('/api/run-workflow-builder', {
           method: 'POST',
@@ -58,7 +59,7 @@ export function useWorkflowRun() {
           body: JSON.stringify({
             workflow,
             workflowId: currentWorkflowId,
-            targetNodeId: targetNodeId ?? null,
+            targetNodeIds,
           }),
         });
         if (!r.ok) {
@@ -71,7 +72,7 @@ export function useWorkflowRun() {
         }
         const { jobId } = await r.json();
         // eslint-disable-next-line no-console
-        console.log('[builder] job created', jobId, targetNodeId ? `(target=${targetNodeId})` : '');
+        console.log('[builder] job created', jobId, targetNodeIds ? `(targets=${targetNodeIds.join(',')})` : '');
         setCurrentJobId(jobId);
       } catch (e) {
         // eslint-disable-next-line no-console

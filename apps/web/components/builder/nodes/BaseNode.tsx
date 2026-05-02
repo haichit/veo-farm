@@ -258,8 +258,12 @@ export function BaseNode(props: BaseNodeProps) {
         </div>
       </div>
 
-      {/* Body */}
-      <div className="px-3 py-2.5">
+      {/* Body — flex-col + min-h-0 + h-full so children with `flex-1` grow
+          when the user resizes the node via NodeResizer. */}
+      <div
+        className="px-3 py-2.5 flex flex-col gap-2 min-h-0"
+        style={{ height: 'calc(100% - 36px)' }}
+      >
         {children}
         {(data as BuilderNodeData)?.previewMedia && (data as BuilderNodeData).previewMedia!.length > 0 && (
           <PreviewMedia media={(data as BuilderNodeData).previewMedia!} />

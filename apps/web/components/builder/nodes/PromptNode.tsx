@@ -15,8 +15,7 @@ export function PromptNode(props: NodeProps) {
         onChange={(e) => updateConfig(props.id, { text: e.target.value })}
         onMouseDown={(e) => e.stopPropagation()}
         placeholder="Nhập prompt..."
-        rows={4}
-        className="nodrag nowheel w-full bg-[#12121f] border border-white/[0.08] rounded-md p-2 text-xs text-text-primary outline-none focus:border-accent resize-none"
+        className="nodrag nowheel flex-1 min-h-[80px] w-full bg-[#12121f] border border-white/[0.08] rounded-md p-2 text-xs text-text-primary outline-none focus:border-accent resize-none"
       />
     </BaseNode>
   );

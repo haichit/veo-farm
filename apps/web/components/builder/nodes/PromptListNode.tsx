@@ -18,10 +18,9 @@ export function PromptListNode(props: NodeProps) {
         onChange={(e) => updateConfig(props.id, { text: e.target.value })}
         onMouseDown={(e) => e.stopPropagation()}
         placeholder="Mỗi dòng = 1 prompt..."
-        rows={6}
-        className="nodrag nowheel w-full bg-[#12121f] border border-white/[0.08] rounded-md p-2 text-xs text-text-primary outline-none focus:border-accent resize-none"
+        className="nodrag nowheel flex-1 min-h-[100px] w-full bg-[#12121f] border border-white/[0.08] rounded-md p-2 text-xs text-text-primary outline-none focus:border-accent resize-none"
       />
-      <div className="mt-1.5 text-[10px] text-text-muted">{lines.length} prompts</div>
+      <div className="text-[10px] text-text-muted">{lines.length} prompts</div>
     </BaseNode>
   );
 }
