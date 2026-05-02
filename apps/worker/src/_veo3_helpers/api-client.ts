@@ -16,6 +16,8 @@ import {
   SEC_CH_UA_PLATFORM,
   VIDEO_MODEL_KEYS,
   VIDEO_ASPECT_RATIOS,
+  IMAGE_MODELS,
+  IMAGE_ASPECT_RATIOS,
   ENDPOINT_BY_MODE,
   ENDPOINTS,
   POLICY_KEYWORDS,
@@ -139,6 +141,75 @@ export class ApiClient extends EventEmitter {
     );
     this.emit('video:started', result.body);
     return result.body;
+  }
+
+  /**
+   * Generate one or more images via flow.google `flowMedia:batchGenerateImages`.
+   * Returns an array of direct CDN URLs (`fifeUrl`) — no polling needed since
+   * the response carries `media[].image.generatedImage.fifeUrl` synchronously.
+   *
+   * Supported model values: 'nano_banana_2' | 'nano_banana_pro' | 'imagen_4'
+   * | 'imagen_4_ref'.
+   * Supported aspect ratios: '16:9' | '9:16' | '1:1' | '4:3' | '3:4'.
+   */
+  async generateImages(
+    prompt: string,
+    opts: {
+      model?: keyof typeof IMAGE_MODELS;
+      aspectRatio?: keyof typeof IMAGE_ASPECT_RATIOS;
+      seed?: number;
+      count?: number;
+      referenceImages?: Array<string | { mediaId: string; name?: string }>;
+    } = {},
+  ): Promise<string[]> {
+    const projectId = await this._ensureProject();
+    const imageModelName = IMAGE_MODELS[opts.model ?? 'nano_banana_2'] ?? 'NARWHAL';
+    const imageAspectRatio =
+      IMAGE_ASPECT_RATIOS[opts.aspectRatio ?? '16:9'] ?? 'IMAGE_ASPECT_RATIO_LANDSCAPE';
+    const seed = opts.seed ?? Math.floor(Math.random() * 1e9);
+    const count = Math.max(1, Math.min(opts.count ?? 1, 4));
+    const batchId = crypto.randomUUID();
+    const refs = (opts.referenceImages ?? []).map((r) =>
+      typeof r === 'string' ? { name: r } : r,
+    );
+
+    const clientContext = await this._buildClientContext(projectId, 'IMAGE_GENERATION');
+    const requests = Array.from({ length: count }, (_, i) => ({
+      clientContext,
+      imageModelName,
+      imageAspectRatio,
+      structuredPrompt: { parts: [{ text: prompt }] },
+      seed: seed + i,
+      imageInputs: refs,
+    }));
+    const body = {
+      clientContext,
+      mediaGenerationContext: { batchId },
+      useNewMedia: true,
+      requests,
+    };
+
+    this.emit('image:generating', { prompt, model: imageModelName, count });
+    const url = `${API_BASE}/v1/projects/${projectId}/flowMedia:batchGenerateImages`;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await this._browserFetch<any>('POST', url, body, 'IMAGE_GENERATION');
+    const media = result.body?.media ?? result.body?.results ?? [];
+    const urls: string[] = [];
+    for (const m of media) {
+      const fife =
+        m?.image?.generatedImage?.fifeUrl ??
+        m?.generatedImage?.fifeUrl ??
+        m?.image?.fifeUrl ??
+        null;
+      if (fife) urls.push(fife);
+    }
+    this.emit('image:complete', { urls });
+    if (urls.length === 0) {
+      throw new Error(
+        `generateImages: no fifeUrl in response — body keys: ${Object.keys(result.body ?? {}).join(',')}`,
+      );
+    }
+    return urls;
   }
 
   async checkVideoStatus(

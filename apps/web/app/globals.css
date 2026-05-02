@@ -141,3 +141,32 @@
   background: var(--accent-glow);
   color: var(--accent);
 }
+
+/* ───────────────────────────── Builder Canvas ──────────────────────────── */
+
+@keyframes edgeFlow {
+  to {
+    stroke-dashoffset: -28;
+  }
+}
+
+.builder-canvas .react-flow__handle {
+  border-radius: 50%;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.builder-canvas .react-flow__handle:hover {
+  transform: scale(1.25);
+  box-shadow: 0 0 0 3px rgba(138, 92, 246, 0.25);
+}
+.builder-canvas .react-flow__handle-connecting {
+  background: var(--accent) !important;
+}
+.builder-canvas .react-flow__node {
+  font-family: var(--font-inter), system-ui, sans-serif;
+}
+.builder-canvas .react-flow__pane {
+  cursor: default;
+}
+.builder-canvas .react-flow__pane.dragging {
+  cursor: grabbing;
+}

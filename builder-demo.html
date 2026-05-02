@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <title>Veo Farm — Workflow Builder Demo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <style>
+    :root {
+      --bg-primary: #0a0a12;
+      --bg-secondary: #111120;
+      --bg-card: #161628;
+      --bg-card-hover: #1c1c38;
+      --bg-input: #12121f;
+      --node-bg: #1a1a2e;
+      --border: rgba(255,255,255,0.06);
+      --border-hover: rgba(255,255,255,0.15);
+      --accent: #8a5cf6;
+      --accent-hover: #7c4dff;
+      --text-primary: #f0f0f5;
+      --text-secondary: #a0a0b8;
+      --text-muted: #5a5a75;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      overflow: hidden;
+    }
+    .bg-orbs { position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }
+    .orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(120px);
+      opacity: 0.12;
+      animation: orbFloat 25s ease-in-out infinite;
+    }
+    .orb-1 { width: 500px; height: 500px; background: #8a5cf6; top: -200px; left: -100px; }
+    .orb-2 { width: 400px; height: 400px; background: #ec4899; bottom: -150px; right: -100px; animation-delay: -8s; }
+    .orb-3 { width: 350px; height: 350px; background: #06b6d4; top: 50%; left: 50%; animation-delay: -16s; }
+    @keyframes orbFloat {
+      0%,100% { transform: translate(0,0) scale(1); }
+      33% { transform: translate(40px,-30px) scale(1.1); }
+      66% { transform: translate(-30px,20px) scale(0.95); }
+    }
+
+    /* Top nav */
+    .topnav {
+      position: relative; z-index: 50;
+      height: 48px;
+      background: rgba(17,17,32,0.85);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 16px;
+    }
+    .topnav-title {
+      font-size: 14px; font-weight: 700;
+      background: linear-gradient(135deg, #f0f0f5, #a78bfa);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .topnav-tab {
+      display: flex; align-items: center; gap: 5px;
+      padding: 6px 14px; border-radius: 8px; border: 1px solid transparent;
+      background: transparent; color: var(--text-muted);
+      font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;
+    }
+    .topnav-tab:hover { color: var(--text-secondary); background: rgba(255,255,255,0.04); }
+    .topnav-tab.active { color: var(--text-primary); background: rgba(138,92,246,0.25); border-color: rgba(138,92,246,0.15); }
+    .conn-badge {
+      display: flex; align-items: center; gap: 6px; padding: 4px 12px;
+      border-radius: 20px; font-size: 11px; font-weight: 500;
+      border: 1px solid rgba(52,211,153,0.3); background: rgba(52,211,153,0.1); color: #34d399;
+    }
+    .conn-dot { width: 6px; height: 6px; border-radius: 50%; background: #34d399; box-shadow: 0 0 6px #34d399; }
+
+    /* Layout */
+    .builder-layout {
+      position: relative; z-index: 10;
+      display: flex; height: calc(100vh - 48px); overflow: hidden;
+    }
+    .sidebar {
+      width: 240px; min-width: 240px;
+      background: var(--bg-secondary); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; overflow-y: auto;
+    }
+    .sidebar-section { padding: 14px 12px; border-bottom: 1px solid var(--border); }
+    .sidebar-label {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 1.5px; color: var(--text-muted); margin-bottom: 10px;
+    }
+    .palette-cat { margin-bottom: 10px; }
+    .palette-cat-label {
+      font-size: 10px; font-weight: 600; color: var(--text-muted);
+      margin-bottom: 4px; text-transform: uppercase; letter-spacing: 1px;
+    }
+    .palette-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 10px; border-radius: 6px;
+      background: var(--bg-card); border: 1px solid var(--border);
+      margin-bottom: 4px; cursor: grab;
+      font-size: 12px; font-weight: 500; color: var(--text-secondary);
+      transition: all 0.15s ease; user-select: none;
+    }
+    .palette-item:hover {
+      background: var(--bg-card-hover); color: var(--text-primary);
+      border-color: rgba(138,92,246,0.15); transform: translateX(2px);
+    }
+
+    /* Canvas */
+    .canvas-wrap { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+    .toolbar {
+      display: flex; align-items: center; gap: 12px;
+      padding: 8px 14px; background: var(--bg-secondary); border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 7px 14px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--bg-card); color: var(--text-secondary);
+      font-size: 12px; font-weight: 500; cursor: pointer; font-family: inherit;
+      transition: all 0.2s;
+    }
+    .btn:hover { background: var(--bg-card-hover); }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+      color: white; border: none; box-shadow: 0 4px 16px rgba(138,92,246,0.3);
+    }
+    .stat-group {
+      display: flex; align-items: center; gap: 10px;
+      padding: 4px 12px; border-radius: 8px;
+      background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+    }
+    .stat-item { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+    .stat-val { font-size: 14px; font-weight: 700; }
+    .stat-lbl { font-size: 10px; font-weight: 500; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px; }
+    .stat-done .stat-val { color: var(--accent); }
+    .stat-wait .stat-val { color: #fbbf24; }
+    .stat-err .stat-val { color: #ef4444; }
+    .toolbar-hint { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+    .album-btn {
+      display: flex; align-items: center; gap: 6px;
+      padding: 7px 12px; border-radius: 8px;
+      border: 1px solid rgba(139,92,246,0.35); background: rgba(139,92,246,0.1);
+      color: #a78bfa; cursor: pointer; font-size: 12px; font-weight: 600; font-family: inherit;
+    }
+    .album-count { background: rgba(139,92,246,0.35); border-radius: 10px; padding: 1px 7px; font-size: 10px; }
+
+    /* Canvas surface */
+    .canvas {
+      flex: 1; position: relative; overflow: auto;
+      background: #0d0d14;
+      background-image:
+        radial-gradient(circle at 1px 1px, rgba(255,255,255,0.04) 1px, transparent 0);
+      background-size: 20px 20px;
+    }
+    .canvas-inner { position: relative; width: 1800px; height: 1100px; }
+
+    /* Frame node */
+    .frame {
+      position: absolute;
+      border: 2px dashed rgba(245,158,11,0.4);
+      background: rgba(245,158,11,0.02);
+      border-radius: 16px;
+    }
+    .frame-header {
+      position: absolute; top: -34px; left: 0;
+      display: flex; align-items: center; gap: 6px;
+      padding: 5px 10px; border-radius: 6px;
+      background: rgba(245,158,11,0.18); border: 1px solid rgba(245,158,11,0.4);
+      backdrop-filter: blur(8px);
+    }
+
+    /* Nodes */
+    .node {
+      position: absolute;
+      background: var(--node-bg);
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      overflow: hidden;
+    }
+    .node.selected { border: 2px solid currentColor; box-shadow: 0 4px 20px currentColor; }
+    .node-header {
+      display: flex; align-items: center; gap: 8px;
+      height: 36px; padding: 0 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .node-icon {
+      width: 22px; height: 22px; border-radius: 5px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px;
+    }
+    .node-title {
+      font-size: 12px; font-weight: 700; color: #f0f0f5;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;
+    }
+    .node-hdr-btns { display: flex; align-items: center; gap: 4px; }
+    .node-hdr-btn {
+      width: 22px; height: 22px; border-radius: 5px;
+      background: rgba(255,255,255,0.06); border: none;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .node-hdr-btn:hover { background: rgba(255,255,255,0.12); }
+    .node-body { padding: 10px; }
+
+    /* Ports */
+    .port-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; position: relative; }
+    .port-row.input { padding-left: 0; margin-left: -7px; }
+    .port-row.output { justify-content: flex-end; padding-right: 0; margin-right: -7px; }
+    .port-dot {
+      width: 14px; height: 14px; border-radius: 50%;
+      border: 2px solid var(--node-bg); flex-shrink: 0;
+    }
+    .port-label { font-size: 10px; color: #8888a0; }
+
+    /* Chips row */
+    .chip-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 8px; border-radius: 6px;
+      background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+      color: #d4d4d4; font-size: 10px; font-weight: 500; cursor: pointer;
+      font-family: inherit;
+    }
+    .chip:hover { background: rgba(255,255,255,0.08); }
+
+    /* Toggle */
+    .toggle { position: relative; display: inline-block; width: 32px; height: 18px; }
+    .toggle-bg { position: absolute; inset: 0; border-radius: 18px; background: #84cc16; transition: 0.3s; }
+    .toggle-bg.off { background: rgba(255,255,255,0.1); }
+    .toggle-knob { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: white; transition: 0.3s; }
+    .toggle-bg.on .toggle-knob { transform: translateX(14px); }
+
+    /* Warning box */
+    .warning-box {
+      display: flex; align-items: center; gap: 6px;
+      padding: 8px 10px; border-radius: 6px;
+      background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.3);
+      color: #fbbf24; font-size: 11px; font-weight: 500; margin-top: 8px;
+    }
+
+    /* Loading ring */
+    .loading-overlay {
+      position: absolute; inset: 4px; top: 40px;
+      background: rgba(14,14,28,0.65); border-radius: 6px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      backdrop-filter: blur(2px);
+    }
+    .ring {
+      width: 70px; height: 70px; border-radius: 50%;
+      background: conic-gradient(from -90deg, #ec4899 0deg 280deg, rgba(255,255,255,0.08) 280deg 360deg);
+      display: flex; align-items: center; justify-content: center;
+      position: relative; mask: radial-gradient(circle at center, transparent 22px, black 24px);
+      -webkit-mask: radial-gradient(circle at center, transparent 22px, black 24px);
+      animation: spin 2s linear infinite;
+    }
+    .ring-pct {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 700; color: white;
+    }
+    .loading-sub {
+      margin-top: 8px; font-size: 11px; color: #ccc; font-weight: 600;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Image preview inside node */
+    .preview-img {
+      width: 100%; height: 120px; border-radius: 6px;
+      background: #1c1c38; border: 1px solid rgba(255,255,255,0.08);
+      object-fit: cover; margin-top: 8px;
+    }
+
+    /* Video thumb (inline preview) */
+    .video-thumb-wrap {
+      position: relative;
+      width: 100%; height: 160px;
+      border-radius: 6px;
+      overflow: hidden;
+      margin-top: 8px;
+      background: #0d0d14;
+      border: 1px solid rgba(255,255,255,0.08);
+      cursor: pointer;
+    }
+    .video-thumb {
+      width: 100%; height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .video-overlay-icons {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.18);
+      opacity: 1; transition: opacity 0.2s;
+      pointer-events: none;
+    }
+    .video-thumb-wrap:hover .video-overlay-icons { opacity: 0; }
+    .thumb-counter {
+      position: absolute; bottom: 6px; right: 6px;
+      font-size: 10px; color: rgba(255,255,255,0.85);
+      background: rgba(0,0,0,0.55); padding: 1px 6px; border-radius: 4px;
+      pointer-events: none;
+    }
+    .thumb-duration {
+      position: absolute; bottom: 6px; left: 6px;
+      font-size: 10px; color: rgba(255,255,255,0.85);
+      background: rgba(0,0,0,0.55); padding: 1px 6px; border-radius: 4px;
+      pointer-events: none;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Lightbox modal */
+    .lightbox {
+      position: fixed; inset: 0; z-index: 9999;
+      background: rgba(0,0,0,0.92); backdrop-filter: blur(12px);
+      display: none;
+      align-items: center; justify-content: center;
+      padding: 32px;
+    }
+    .lightbox.open { display: flex; }
+    .lightbox-content {
+      position: relative;
+      max-width: 90vw; max-height: 90vh;
+      border-radius: 12px; overflow: hidden;
+      box-shadow: 0 20px 80px rgba(138,92,246,0.3);
+      background: #000;
+    }
+    .lightbox-content img,
+    .lightbox-content video {
+      display: block;
+      max-width: 90vw; max-height: 90vh;
+      width: auto; height: auto;
+    }
+    .lightbox-close {
+      position: absolute; top: 16px; right: 16px;
+      width: 36px; height: 36px;
+      border-radius: 50%; border: none;
+      background: rgba(255,255,255,0.1);
+      color: white; cursor: pointer; font-size: 20px;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.2s;
+    }
+    .lightbox-close:hover { background: rgba(239,68,68,0.4); transform: scale(1.05); }
+    .lightbox-download {
+      position: absolute; top: 16px; right: 64px;
+      padding: 8px 16px; border-radius: 8px; border: none;
+      background: linear-gradient(135deg, #8a5cf6, #7c4dff);
+      color: white; cursor: pointer; font-size: 13px; font-weight: 600; font-family: inherit;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .lightbox-download:hover { box-shadow: 0 4px 16px rgba(138,92,246,0.5); }
+
+    /* Textarea-style preview */
+    .text-preview {
+      background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 6px; padding: 8px 10px;
+      font-size: 11px; color: #d4d4d4; line-height: 1.5;
+      max-height: 80px; overflow: auto;
+    }
+
+    /* SVG edges layer */
+    .edges-svg {
+      position: absolute; inset: 0; pointer-events: none; width: 100%; height: 100%;
+    }
+    .edge-path {
+      fill: none; stroke-width: 2.5; opacity: 0.85;
+      transition: stroke-width 0.15s;
+    }
+    .edge-path.running {
+      stroke-dasharray: 8 4;
+      animation: edgeFlow 0.8s linear infinite;
+    }
+    @keyframes edgeFlow { to { stroke-dashoffset: -12; } }
+
+    /* Workflow saved item */
+    .wf-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 10px; border-radius: 6px;
+      cursor: pointer; font-size: 12px;
+    }
+    .wf-item:hover { background: rgba(255,255,255,0.04); }
+    .wf-item.active { background: rgba(138,92,246,0.15); border: 1px solid rgba(138,92,246,0.3); }
+
+    /* Form input */
+    .form-input {
+      width: 100%; padding: 7px 10px; border-radius: 6px;
+      background: var(--bg-input); border: 1px solid var(--border);
+      color: var(--text-primary); font-size: 12px; font-family: inherit; outline: none;
+    }
+    .form-input:focus { border-color: var(--accent); }
+  </style>
+</head>
+<body>
+
+  <div class="bg-orbs">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <!-- ============ TOP NAV ============ -->
+  <nav class="topnav">
+    <div class="flex items-center gap-2">
+      <span style="font-size: 20px;">🎬</span>
+      <span class="topnav-title">Veo Farm</span>
+      <span style="width: 1px; height: 20px; background: var(--border); margin: 0 8px;"></span>
+      <button class="topnav-tab"><i data-lucide="pencil" class="w-4 h-4"></i> Prompt</button>
+      <button class="topnav-tab active"><i data-lucide="git-fork" class="w-4 h-4"></i> Builder</button>
+      <button class="topnav-tab"><i data-lucide="store" class="w-4 h-4"></i> Store</button>
+    </div>
+    <div class="flex items-center gap-2">
+      <button class="topnav-tab"><i data-lucide="home" class="w-4 h-4"></i> Main Page</button>
+      <div class="conn-badge"><span class="conn-dot"></span> Đã kết nối</div>
+      <button class="node-hdr-btn"><i data-lucide="link-2" class="w-3.5 h-3.5"></i></button>
+      <button class="node-hdr-btn"><i data-lucide="settings" class="w-3.5 h-3.5"></i></button>
+    </div>
+  </nav>
+
+  <!-- ============ BUILDER LAYOUT ============ -->
+  <div class="builder-layout">
+
+    <!-- ============ SIDEBAR ============ -->
+    <aside class="sidebar">
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">Nodes</div>
+
+        <div class="palette-cat">
+          <div class="palette-cat-label">Input</div>
+          <div class="palette-item" style="border-left: 3px solid #8a5cf6;">
+            <i data-lucide="sticky-note" style="color: #8a5cf6; width: 15px; height: 15px;"></i> 📄 Text / Prompt
+          </div>
+          <div class="palette-item" style="border-left: 3px solid #6366f1;">
+            <i data-lucide="list" style="color: #6366f1; width: 15px; height: 15px;"></i> 📝 Prompt List
+          </div>
+          <div class="palette-item" style="border-left: 3px solid #06b6d4;">
+            <i data-lucide="upload" style="color: #06b6d4; width: 15px; height: 15px;"></i> 📤 Upload Media
+          </div>
+        </div>
+
+        <div class="palette-cat">
+          <div class="palette-cat-label">Generate</div>
+          <div class="palette-item" style="border-left: 3px solid #84cc16;">
+            <i data-lucide="bot" style="color: #84cc16; width: 15px; height: 15px;"></i> 🤖 Gemini Prompt
+          </div>
+          <div class="palette-item" style="border-left: 3px solid #a855f7;">
+            <i data-lucide="sparkles" style="color: #a855f7; width: 15px; height: 15px;"></i> 🤖 Gemini Prompt (Kie.ai)
+          </div>
+          <div class="palette-item" style="border-left: 3px solid #ec4899;">
+            <i data-lucide="image" style="color: #ec4899; width: 15px; height: 15px;"></i> 🖼️ Generate Image
+          </div>
+          <div class="palette-item" style="border-left: 3px solid #f97316;">
+            <i data-lucide="video" style="color: #f97316; width: 15px; height: 15px;"></i> 🎬 Generate Video
+          </div>
+          <div class="palette-item" style="border-left: 3px solid #10b981;">
+            <i data-lucide="combine" style="color: #10b981; width: 15px; height: 15px;"></i> 🎞️ Ghép Video (Merge)
+          </div>
+        </div>
+
+        <div class="palette-cat">
+          <div class="palette-cat-label">Output</div>
+          <div class="palette-item" style="border-left: 3px solid #34d399;">
+            <i data-lucide="download" style="color: #34d399; width: 15px; height: 15px;"></i> 💾 Download
+          </div>
+        </div>
+
+        <div class="palette-cat">
+          <div class="palette-cat-label">Công cụ</div>
+          <div class="palette-item" style="border-left: 3px solid #f59e0b;">
+            <i data-lucide="frame" style="color: #f59e0b; width: 15px; height: 15px;"></i> 🔳 Khung Nhóm (Frame)
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">Workflows</div>
+        <input type="text" class="form-input" value="Mèo Mochi đi Đà Lạt" />
+        <div class="flex gap-1.5 mt-2">
+          <button class="btn btn-primary" style="flex: 1; padding: 6px 10px; font-size: 11px;">
+            <i data-lucide="save" class="w-3.5 h-3.5"></i> Lưu
+          </button>
+          <button class="btn" style="padding: 6px 10px;"><i data-lucide="plus" class="w-3.5 h-3.5"></i></button>
+          <button class="btn" style="padding: 6px 10px;" title="Export"><i data-lucide="download" class="w-3.5 h-3.5"></i></button>
+          <button class="btn" style="padding: 6px 10px;" title="Import"><i data-lucide="upload" class="w-3.5 h-3.5"></i></button>
+        </div>
+        <div class="mt-3 space-y-1">
+          <div class="wf-item active">
+            <span class="flex-1 truncate text-text-primary">Mèo Mochi đi Đà Lạt</span>
+            <span style="font-size: 10px; color: var(--text-muted);">5 nodes</span>
+          </div>
+          <div class="wf-item">
+            <span class="flex-1 truncate" style="color: var(--text-secondary);">Skincare review</span>
+            <span style="font-size: 10px; color: var(--text-muted);">7 nodes</span>
+          </div>
+          <div class="wf-item">
+            <span class="flex-1 truncate" style="color: var(--text-secondary);">Gunny PK clip</span>
+            <span style="font-size: 10px; color: var(--text-muted);">4 nodes</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ============ CANVAS ============ -->
+    <main class="canvas-wrap">
+
+      <!-- Toolbar -->
+      <div class="toolbar">
+        <button class="btn btn-primary">
+          <i data-lucide="play" class="w-4 h-4"></i> Chạy Workflow
+        </button>
+
+        <div class="stat-group">
+          <div class="stat-item stat-done"><span class="stat-val">2</span><span class="stat-lbl">Xong</span></div>
+          <div class="stat-item stat-wait"><span class="stat-val">1</span><span class="stat-lbl">Chờ</span></div>
+          <div class="stat-item stat-err"><span class="stat-val">0</span><span class="stat-lbl">Lỗi</span></div>
+        </div>
+
+        <span class="toolbar-hint">Scroll: zoom | Alt+drag: pan</span>
+
+        <button class="btn"><i data-lucide="zoom-in" class="w-3.5 h-3.5"></i> Về trung tâm</button>
+
+        <button class="album-btn">
+          <i data-lucide="image" class="w-4 h-4"></i>
+          <span class="album-count">3</span>
+        </button>
+      </div>
+
+      <!-- Canvas surface with nodes -->
+      <div class="canvas">
+        <div class="canvas-inner">
+
+          <!-- SVG edges layer -->
+          <svg class="edges-svg" viewBox="0 0 1800 1100" preserveAspectRatio="none">
+            <!-- Frame: Text Prompt → Generate Image (purple text) -->
+            <path class="edge-path" d="M 360 230 C 460 230 460 230 580 220" stroke="#a78bfa" />
+            <!-- Generate Image → Generate Video (cyan image) -->
+            <path class="edge-path" d="M 860 350 C 950 350 950 480 1080 480" stroke="#22d3ee" />
+            <!-- Upload Media → Generate Image bottom (cyan) -->
+            <path class="edge-path" d="M 280 540 C 450 540 450 760 600 760" stroke="#22d3ee" />
+            <!-- Text Prompt 2 → Generate Image bottom (purple) -->
+            <path class="edge-path" d="M 360 770 C 470 770 470 770 580 770" stroke="#a78bfa" />
+            <!-- Generate Image bottom (running) → Generate Video Start Frame -->
+            <path class="edge-path running" d="M 860 760 C 970 760 970 540 1080 540" stroke="#22d3ee" />
+          </svg>
+
+          <!-- ========== FRAME ========== -->
+          <div class="frame" style="left: 60px; top: 130px; width: 850px; height: 320px;">
+            <div class="frame-header">
+              <i data-lucide="frame" style="color: #f59e0b; width: 14px; height: 14px;"></i>
+              <span style="font-size: 12px; font-weight: 700; color: #f0f0f5;">Khung Nhóm</span>
+              <span style="font-size: 10px; color: var(--text-muted);">(2 nodes)</span>
+              <button class="node-hdr-btn" style="background: transparent;" title="Run frame"><i data-lucide="play" style="color: #a78bfa; width: 12px; height: 12px;"></i></button>
+              <button class="node-hdr-btn" style="background: transparent;"><i data-lucide="info" style="color: #a0aec0; width: 12px; height: 12px;"></i></button>
+            </div>
+          </div>
+
+          <!-- ========== TEXT PROMPT (top) ========== -->
+          <div class="node" style="left: 120px; top: 180px; width: 240px; min-height: 130px;">
+            <div class="node-header" style="background: rgba(138,92,246,0.18); border-bottom: 1px solid rgba(138,92,246,0.25);">
+              <div class="node-icon" style="background: rgba(138,92,246,0.25); color: #8a5cf6;">
+                <i data-lucide="sticky-note" class="w-3.5 h-3.5"></i>
+              </div>
+              <span class="node-title">📄 Text / Prompt</span>
+              <div class="node-hdr-btns">
+                <button class="node-hdr-btn"><i data-lucide="info" class="w-3 h-3" style="color:#a0aec0"></i></button>
+              </div>
+            </div>
+            <div class="node-body" style="position: relative;">
+              <div class="port-row output">
+                <span class="port-label">text</span>
+                <span class="port-dot" style="background: #a78bfa; position: absolute; right: -17px; top: 5px;"></span>
+              </div>
+              <div class="text-preview" style="margin-top: 6px;">Tạo ảnh con chim phượng hoàng khổng lồ bay trên núi tuyết, ánh sáng vàng cinematic</div>
+            </div>
+          </div>
+
+          <!-- ========== GENERATE IMAGE (top, done with preview) ========== -->
+          <div class="node" style="left: 580px; top: 160px; width: 280px; min-height: 200px;">
+            <div class="node-header" style="background: rgba(236,72,153,0.18); border-bottom: 1px solid rgba(236,72,153,0.25);">
+              <div class="node-icon" style="background: rgba(236,72,153,0.25); color: #ec4899;">
+                <i data-lucide="image" class="w-3.5 h-3.5"></i>
+              </div>
+              <span class="node-title">🖼️ Generate Image</span>
+              <span style="width: 6px; height: 6px; border-radius: 50%; background: #34d399; box-shadow: 0 0 6px #34d399;"></span>
+              <div class="node-hdr-btns">
+                <button class="node-hdr-btn" title="Run"><i data-lucide="play" class="w-3 h-3" style="color:#a78bfa"></i></button>
+                <button class="node-hdr-btn" title="Download"><i data-lucide="download" class="w-3 h-3" style="color:#34d399"></i></button>
+                <button class="node-hdr-btn"><i data-lucide="info" class="w-3 h-3" style="color:#a0aec0"></i></button>
+              </div>
+            </div>
+            <div class="node-body" style="position: relative;">
+              <div class="port-row input">
+                <span class="port-dot" style="background: #a78bfa; position: absolute; left: -17px; top: 5px;"></span>
+                <span class="port-label">prompt (opt)</span>
+              </div>
+              <div class="port-row input" style="margin-top: 14px;">
+                <span class="port-dot" style="background: #22d3ee; position: absolute; left: -17px; top: 5px;"></span>
+                <span class="port-label">ref img 1 (opt)</span>
+              </div>
+              <div class="port-row output">
+                <span class="port-label">image</span>
+                <span class="port-dot" style="background: #22d3ee; position: absolute; right: -17px; top: 33px;"></span>
+              </div>
+              <!-- Preview placeholder showing generated image -->
+              <div style="margin-top: 8px; height: 90px; border-radius: 6px; background: linear-gradient(135deg, #1a3a5e 0%, #5a3a1a 50%, #2a1a3a 100%); border: 1px solid rgba(255,255,255,0.08); display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden;">
+                <span style="font-size: 36px;">🦅</span>
+                <span style="position: absolute; bottom: 4px; right: 4px; font-size: 9px; color: rgba(255,255,255,0.6); background: rgba(0,0,0,0.4); padding: 1px 5px; border-radius: 3px;">1/1</span>
+              </div>
+              <div class="chip-row">
+                <span class="chip">16:9 <i data-lucide="chevron-down" class="w-2 h-2 opacity-60"></i></span>
+                <span class="chip">x1 <i data-lucide="chevron-down" class="w-2 h-2 opacity-60"></i></span>
+                <span class="chip">1080p <i data-lucide="chevron-down" class="w-2 h-2 opacity-60"></i></span>
+                <span class="chip">NB-Pro <i data-lucide="chevron-down" class="w-2 h-2 opacity-60"></i></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- ========== UPLOAD MEDIA (left bottom) ========== -->
+          <div class="node" style="left: 60px; top: 480px; width: 220px; min-height: 180px;">
+            <div class="node-header" style="background: rgba(6,182,212,0.18); border-bottom: 1px solid rgba(6,182,212,0.25);">
+              <div class="node-icon" style="background: rgba(6,182,212,0.25); color: #06b6d4;">
+                <i data-lucide="upload" class="w-3.5 h-3.5"></i>
+              </div>
+              <span class="node-title">📤 Upload Media</span>
+              <div class="node-hdr-btns">
+                <button class="node-hdr-btn" title="Upload"><i data-lucide="folder-up" class="w-3 h-3" style="color:#f59e0b"></i></button>
+                <button class="node-hdr-btn"><i data-lucide="info" class="w-3 h-3" style="color:#a0aec0"></i></button>
+              </div>
+            </div>
+            <div class="node-body" style="position: relative;">
+              <div class="port-row output">
+                <span class="port-label">media</span>
+                <span class="port-dot" style="background: #22d3ee; position: absolute; right: -17px; top: 5px;"></span>
+              </div>
+              <div style="margin-top: 8px; height: 110px; border-radius: 6px; background: linear-gradient(135deg, #4a3a3a 0%, #2a2a4a 100%); border: 1px solid rgba(255,255,255,0.08); display: flex; align-items: center; justify-content: center;">
+                <span style="font-size: 40px;">👧</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- ========== TEXT PROMPT 2 (bottom) ========== -->
+          <div class="node" style="left: 120px; top: 720px; width: 240px; min-height: 130px;">
+            <div class="node-header" style="background: rgba(138,92,246,0.18); border-bottom: 1px solid rgba(138,92,246,0.25);">
+              <div class="node-icon" style="background: rgba(138,92,246,0.25); color: #8a5cf6;">
+                <i data-lucide="sticky-note" class="w-3.5 h-3.5"></i>
+              </div>
+              <span class="node-title">📄 Text / Prompt</span>
+              <div class="node-hdr-btns">
+                <button class="node-hdr-btn"><i data-lucide="info" class="w-3 h-3" style="color:#a0aec0"></i></button>
+              </div>
+            </div>
+            <div class="node-body" style="position: relative;">
+              <div class="port-row output">
+                <span class="port-label">text</span>
+                <span class="port-dot" style="background: #a78bfa; position: absolute; right: -17px; top: 5px;"></span>
+              </div>
+              <div class="text-preview" style="margin-top: 6px;">Cô gái này cưỡi trên lưng con chim khổng lồ, gió thổi tóc bay</div>
+            </div>
+          </div>
+
+          <!-- ========== GENERATE IMAGE 2 (running with progress ring) ========== -->
+          <div class="node" style="left: 580px; top: 700px; width: 280px; min-height: 200px;">
+            <div class="node-header" style="background: rgba(236,72,153,0.18); border-bottom: 1px solid rgba(236,72,153,0.25);">
+              <div class="node-icon" style="background: rgba(236,72,153,0.25); color: #ec4899;">
+                <i data-lucide="image" class="w-3.5 h-3.5"></i>
+              </div>
+              <span class="node-title">🖼️ Generate Image</span>
+              <div class="node-hdr-btns">
+                <button class="node-hdr-btn" title="Run"><i data-lucide="play" class="w-3 h-3" style="color:#a78bfa"></i></button>
+                <button class="node-hdr-btn"><i data-lucide="info" class="w-3 h-3" style="color:#a0aec0"></i></button>
+              </div>
+            </div>
+            <div class="node-body" style="position: relative;">
+              <div class="port-row input">
+                <span class="port-dot" style="background: #a78bfa; position: absolute; left: -17px; top: 5px;"></span>
+                <span class="port-label">prompt (opt)</span>
+              </div>
+              <div class="port-row input" style="margin-top: 14px;">
+                <span class="port-dot" style="background: #22d3ee; position: absolute; left: -17px; top: 5px;"></span>
+                <span class="port-label">ref img 1 (opt)</span>
+              </div>
+              <div class="port-row input" style="margin-top: 14px;">
+                <span class="port-dot" style="background: #22d3ee; position: absolute; left: -17px; top: 5px;"></span>
+                <span class="port-label">ref img 2 (opt)</span>
+              </div>
+              <div class="port-row input" style="margin-top: 14px;">
+                <span class="port-dot" style="background: #22d3ee; position: absolute; left: -17px; top: 5px;"></span>
+                <span class="port-label">ref img 3 (opt)</span>
+              </div>
+              <div class="port-row output">
+                <span class="port-label">image</span>
+                <span class="port-dot" style="background: #22d3ee; position: absolute; right: -17px; top: 33px;"></span>
+              </div>
+              <div class="chip-row">
+                <span class="chip">16:9</span><span class="chip">x1</span><span class="chip">1080p</span><span class="chip">NB-Pro</span>
+              </div>
+              <!-- Loading overlay -->
+              <div class="loading-overlay">
+                <div class="ring"><span class="ring-pct">62%</span></div>
+                <div class="loading-sub">Đang gen...</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ========== GENERATE VIDEO (done state, video preview) ========== -->
+          <div class="node" style="left: 1080px; top: 440px; width: 370px; min-height: 320px;">
+            <div class="node-header" style="background: rgba(249,115,22,0.18); border-bottom: 1px solid rgba(249,115,22,0.25);">
+              <div class="node-icon" style="background: rgba(249,115,22,0.25); color: #f97316;">
+                <i data-lucide="video" class="w-3.5 h-3.5"></i>
+              </div>
+              <span class="node-title">🎬 Generate Video</span>
+              <span style="width: 6px; height: 6px; border-radius: 50%; background: #34d399; box-shadow: 0 0 6px #34d399;"></span>
+              <div class="node-hdr-btns">
+                <button class="node-hdr-btn" title="Run"><i data-lucide="play" class="w-3 h-3" style="color:#a78bfa"></i></button>
+                <button class="node-hdr-btn" title="Download"><i data-lucide="download" class="w-3 h-3" style="color:#34d399"></i></button>
+                <button class="node-hdr-btn"><i data-lucide="info" class="w-3 h-3" style="color:#a0aec0"></i></button>
+              </div>
+            </div>
+            <div class="node-body" style="position: relative;">
+              <div class="port-row input">
+                <span class="port-dot" style="background: #a78bfa; position: absolute; left: -17px; top: 5px;"></span>
+                <span class="port-label">prompt (opt)</span>
+              </div>
+              <div class="port-row input" style="margin-top: 14px;">
+                <span class="port-dot" style="background: #22d3ee; position: absolute; left: -17px; top: 5px;"></span>
+                <span class="port-label">Start Frame (opt)</span>
+              </div>
+              <div class="port-row input" style="margin-top: 14px;">
+                <span class="port-dot" style="background: #22d3ee; position: absolute; left: -17px; top: 5px;"></span>
+                <span class="port-label">End Frame (opt)</span>
+              </div>
+              <div class="port-row output">
+                <span class="port-label">video</span>
+                <span class="port-dot" style="background: #fb923c; position: absolute; right: -17px; top: 33px;"></span>
+              </div>
+
+              <!-- Video preview thật -->
+              <div class="video-thumb-wrap" data-video-url="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4">
+                <video
+                  class="video-thumb"
+                  src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
+                  muted
+                  playsinline
+                  loop
+                  preload="metadata"
+                  poster=""
+                  ondblclick="openLightbox(this.src, 'video')"
+                  onmouseenter="this.play()"
+                  onmouseleave="this.pause(); this.currentTime = 0;"
+                ></video>
+                <div class="video-overlay-icons">
+                  <i data-lucide="play-circle" style="color:rgba(255,255,255,0.9); width: 36px; height: 36px;"></i>
+                </div>
+                <span class="thumb-counter">1/1</span>
+                <span class="thumb-duration">0:15</span>
+              </div>
+
+              <div class="chip-row">
+                <span class="chip">16:9 <i data-lucide="chevron-down" class="w-2 h-2 opacity-60"></i></span>
+                <span class="chip">x1</span>
+                <span class="chip">1080p</span>
+                <span class="chip">Fast↓ <i data-lucide="chevron-down" class="w-2 h-2 opacity-60"></i></span>
+                <span class="chip">FRAME</span>
+                <span class="chip">8s</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- ========== GEMINI PROMPT (showcase warning state) ========== -->
+          <div class="node" style="left: 1500px; top: 180px; width: 280px; min-height: 200px;">
+            <div class="node-header" style="background: rgba(132,204,22,0.18); border-bottom: 1px solid rgba(132,204,22,0.25);">
+              <div class="node-icon" style="background: rgba(132,204,22,0.25); color: #84cc16;">
+                <i data-lucide="bot" class="w-3.5 h-3.5"></i>
+              </div>
+              <span class="node-title">🤖 Gemini Prompt</span>
+              <div class="node-hdr-btns">
+                <button class="node-hdr-btn" title="Run"><i data-lucide="sparkles" class="w-3 h-3" style="color:#84cc16"></i></button>
+                <button class="node-hdr-btn"><i data-lucide="info" class="w-3 h-3" style="color:#a0aec0"></i></button>
+              </div>
+            </div>
+            <div class="node-body" style="position: relative;">
+              <div class="port-row input">
+                <span class="port-dot" style="background: #a78bfa; position: absolute; left: -17px; top: 5px;"></span>
+                <span class="port-label">text (opt)</span>
+              </div>
+              <div class="port-row input" style="margin-top: 14px;">
+                <span class="port-dot" style="background: #22d3ee; position: absolute; left: -17px; top: 5px;"></span>
+                <span class="port-label">media 1 (opt)</span>
+              </div>
+              <div class="port-row output">
+                <span class="port-label">text</span>
+                <span class="port-dot" style="background: #a78bfa; position: absolute; right: -17px; top: 5px;"></span>
+              </div>
+
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 12px;">
+                <span style="font-size: 11px; color: var(--text-secondary);">Bổ sung lệnh phụ</span>
+                <span class="toggle"><span class="toggle-bg off"><span class="toggle-knob"></span></span></span>
+              </div>
+
+              <div class="warning-box">
+                <i data-lucide="alert-triangle" class="w-3.5 h-3.5"></i>
+                Chưa cài API Key!
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </main>
+
+  </div>
+
+  <!-- ============ LIGHTBOX MODAL ============ -->
+  <div class="lightbox" id="lightbox" onclick="if(event.target.id==='lightbox') closeLightbox()">
+    <div class="lightbox-content" id="lightboxContent"></div>
+    <button class="lightbox-download" onclick="downloadCurrentMedia()">
+      <i data-lucide="download" class="w-4 h-4"></i> Tải về
+    </button>
+    <button class="lightbox-close" onclick="closeLightbox()">×</button>
+  </div>
+
+  <script>
+    // Init Lucide icons
+    lucide.createIcons();
+
+    // Lightbox state
+    let currentMediaUrl = '';
+    let currentMediaType = '';
+
+    function openLightbox(url, type) {
+      currentMediaUrl = url;
+      currentMediaType = type;
+      const content = document.getElementById('lightboxContent');
+      if (type === 'video') {
+        content.innerHTML = `<video src="${url}" controls autoplay loop></video>`;
+      } else {
+        content.innerHTML = `<img src="${url}" alt="" />`;
+      }
+      document.getElementById('lightbox').classList.add('open');
+    }
+
+    function closeLightbox() {
+      document.getElementById('lightbox').classList.remove('open');
+      document.getElementById('lightboxContent').innerHTML = '';
+    }
+
+    function downloadCurrentMedia() {
+      if (!currentMediaUrl) return;
+      const a = document.createElement('a');
+      a.href = currentMediaUrl;
+      a.download = currentMediaType === 'video' ? 'veo-farm-video.mp4' : 'veo-farm-image.png';
+      a.target = '_blank';
+      a.click();
+    }
+
+    // Esc to close
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeLightbox();
+    });
+
+    // Image thumbnail double-click → lightbox (find all preview imgs)
+    // (placeholder for future image preview nodes if added)
+
+    // Sample interaction: pan canvas with Alt+drag
+    const canvas = document.querySelector('.canvas');
+    let isPanning = false, startX = 0, startY = 0, scrollLeft = 0, scrollTop = 0;
+    canvas.addEventListener('mousedown', (e) => {
+      if (!e.altKey) return;
+      isPanning = true;
+      canvas.style.cursor = 'grabbing';
+      startX = e.pageX - canvas.offsetLeft;
+      startY = e.pageY - canvas.offsetTop;
+      scrollLeft = canvas.scrollLeft;
+      scrollTop = canvas.scrollTop;
+    });
+    canvas.addEventListener('mousemove', (e) => {
+      if (!isPanning) return;
+      e.preventDefault();
+      canvas.scrollLeft = scrollLeft - (e.pageX - canvas.offsetLeft - startX);
+      canvas.scrollTop = scrollTop - (e.pageY - canvas.offsetTop - startY);
+    });
+    canvas.addEventListener('mouseup', () => { isPanning = false; canvas.style.cursor = 'default'; });
+    canvas.addEventListener('mouseleave', () => { isPanning = false; canvas.style.cursor = 'default'; });
+
+    // Initial scroll position to show the workflow
+    setTimeout(() => { canvas.scrollLeft = 0; canvas.scrollTop = 100; }, 100);
+  </script>
+
+</body>
+</html>
