@@ -654,6 +654,26 @@ function resolvePrompt(
   return cfg.text ?? cfg.prompt ?? '';
 }
 
+// Returns the fan-out list of prompts when an upstream prompt_list is wired
+// in, or null when there's a single prompt. Each line of prompt_list runs
+// the downstream node once.
+function resolvePromptList(
+  incoming: Array<{ source: string; targetHandle?: string }>,
+  outputs: Map<string, unknown>,
+): string[] | null {
+  for (const e of incoming) {
+    if (e.targetHandle && e.targetHandle !== 'input-0') continue;
+    const up = outputs.get(e.source);
+    if (!up || typeof up !== 'object') continue;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const o = up as any;
+    if (Array.isArray(o.textList) && o.textList.length > 0) {
+      return o.textList.map((s: unknown) => String(s ?? '').trim()).filter(Boolean);
+    }
+  }
+  return null;
+}
+
 // Resolve image inputs for a generate_video node. Port indexes follow
 // dynamic-ports.ts:
 //   FRAME mode → input-1 = Start Frame, input-2 = End Frame
@@ -716,6 +736,32 @@ async function executeBuilderNode(
 
   if (node.type === 'generate_image') {
     const { runGenerateImageNode } = await import('../plugins/builder/generate-image.js');
+    // Fan-out: if upstream is a prompt_list, run once per line and merge
+    // the resulting media arrays. Single-prompt path is unchanged.
+    const promptList = resolvePromptList(incoming, outputs);
+    if (promptList && promptList.length > 1) {
+      const allMedia: Array<Record<string, unknown>> = [];
+      for (let i = 0; i < promptList.length; i++) {
+        const p = promptList[i];
+        logger.info({ index: i + 1, total: promptList.length, prompt: p.slice(0, 60) }, 'generate_image: fan-out');
+        const out = await runGenerateImageNode({
+          prompt: p,
+          config: {
+            ratio: cfg.ratio as string | undefined,
+            quantity: cfg.quantity as number | undefined,
+            quality: cfg.quality as string | undefined,
+            imageModel: cfg.imageModel as string | undefined,
+          },
+          userId: job.user_id,
+          jobId: job.id,
+        });
+        for (const m of out.media) allMedia.push(m as Record<string, unknown>);
+      }
+      return {
+        media: allMedia,
+        image: (allMedia[0] as { url?: string })?.url,
+      };
+    }
     const prompt = resolvePrompt(node, incoming, outputs);
     const out = await runGenerateImageNode({
       prompt,
@@ -733,8 +779,35 @@ async function executeBuilderNode(
 
   if (node.type === 'generate_video') {
     const { runGenerateVideoNode } = await import('../plugins/builder/generate-video.js');
-    const prompt = resolvePrompt(node, incoming, outputs);
     const refs = resolveVideoRefs(incoming, outputs, (cfg.videoMode as string) ?? 'FRAME');
+    const promptList = resolvePromptList(incoming, outputs);
+    if (promptList && promptList.length > 1) {
+      const allMedia: Array<Record<string, unknown>> = [];
+      for (let i = 0; i < promptList.length; i++) {
+        const p = promptList[i];
+        logger.info({ index: i + 1, total: promptList.length, prompt: p.slice(0, 60) }, 'generate_video: fan-out');
+        const out = await runGenerateVideoNode({
+          prompt: p,
+          config: {
+            ratio: cfg.ratio as string | undefined,
+            quantity: cfg.quantity as number | undefined,
+            quality: cfg.quality as string | undefined,
+            videoModel: cfg.videoModel as string | undefined,
+            videoMode: cfg.videoMode as string | undefined,
+            duration: cfg.duration as number | undefined,
+          },
+          refs,
+          userId: job.user_id,
+          jobId: job.id,
+        });
+        for (const m of out.media) allMedia.push(m as Record<string, unknown>);
+      }
+      return {
+        media: allMedia,
+        video: (allMedia[0] as { url?: string })?.url,
+      };
+    }
+    const prompt = resolvePrompt(node, incoming, outputs);
     const out = await runGenerateVideoNode({
       prompt,
       config: {
