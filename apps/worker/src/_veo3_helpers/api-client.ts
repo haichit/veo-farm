@@ -673,6 +673,15 @@ export class ApiClient extends EventEmitter {
         const bodyStr =
           typeof err.body === 'object' ? JSON.stringify(err.body) : String(err.body ?? '');
         if (POLICY_KEYWORDS.some((k) => bodyStr.includes(k))) {
+          // Friendlier Vietnamese message for the most common reject — Google
+          // blocks images naming real public figures (politicians, celebrities,
+          // athletes). User has to rewrite the prompt without the name.
+          if (bodyStr.includes('PROMINENT_PEOPLE_FILTER_FAILED')) {
+            throw new Error(
+              'POLICY_VIOLATION: Google chặn ảnh có tên nhân vật nổi tiếng (chính khách / người của công chúng). ' +
+                'Bỏ tên cụ thể trong prompt và mô tả bằng đặc điểm chung (vd: "một người đàn ông trung niên mặc vest đen phát biểu") rồi thử lại.',
+            );
+          }
           throw new Error(`POLICY_VIOLATION: ${bodyStr.substring(0, 500)}`);
         }
         // 403 with re-solvable cause: rotate recaptcha session, fetch a
