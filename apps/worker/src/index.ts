@@ -86,15 +86,19 @@ async function resetStuckJobs() {
   }
 }
 
-// Mirror of resetStuckJobs but for accounts. If a previous worker crashed
-// mid-generation, the account it claimed stays at status='busy' and
-// claimAccount round-robins past it forever. Reset busy → idle on boot.
-async function resetStuckAccounts() {
-  const { data, error } = await supabase()
-    .from('accounts')
-    .update({ status: 'idle' })
-    .eq('status', 'busy')
-    .select('id, label');
+// Cleanup for accounts stuck at status='busy' — happens when:
+//  - a previous worker crashed mid-generation (no release ran)
+//  - a release race-conditioned with another worker write (rare)
+//  - tsx watch SIGKILLed the worker between completion and release
+//
+// If `staleAfterSec` is set, only flip rows whose last update is older
+// than that — protects in-flight jobs from being yanked. Boot-time call
+// uses 0 (force reset everything since there are no in-flight jobs at boot).
+async function resetStuckAccounts(staleAfterSec = 0) {
+  const cutoff = new Date(Date.now() - staleAfterSec * 1000).toISOString();
+  let q = supabase().from('accounts').update({ status: 'idle' }).eq('status', 'busy');
+  if (staleAfterSec > 0) q = q.lt('updated_at', cutoff);
+  const { data, error } = await q.select('id, label');
   if (error) {
     logger.warn({ err: error.message }, 'reset stuck accounts failed');
     return;
@@ -188,6 +192,15 @@ async function main() {
   await resetStuckAccounts();
   await heartbeat();
   setInterval(heartbeat, HEARTBEAT_INTERVAL);
+
+  // Self-healing: every 30s, reset any account that has been 'busy' but
+  // hasn't been touched in 3 minutes. Average gen takes <90s, so a row
+  // older than 3 min is almost certainly leftover from a crash or race.
+  setInterval(() => {
+    void resetStuckAccounts(180).catch((e) =>
+      logger.warn({ err: e?.message ?? e }, 'periodic account cleanup failed'),
+    );
+  }, 30_000);
 
   // Pre-warm the browser pool for veo3 accounts — first user-triggered job
   // hits a warm slot instead of paying ~60s cold-start. Disabled with
