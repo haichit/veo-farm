@@ -809,6 +809,7 @@ async function executeBuilderNode(
       config: {
         promptTemplate: cfg.promptTemplate as string | undefined,
         manualOutput: cfg.manualOutput as string | undefined,
+        geminiCookies: cfg.geminiCookies as string | undefined,
       },
       userId: job.user_id,
     });

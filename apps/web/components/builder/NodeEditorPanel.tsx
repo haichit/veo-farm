@@ -195,6 +195,36 @@ export function NodeEditorPanel() {
           </>
         )}
 
+        {type === 'gemini_chat' && (
+          <>
+            <TextEdit
+              label="Câu hỏi cho media"
+              value={(cfg.promptTemplate as string) ?? ''}
+              onChange={(v) => updateConfig(node.id, { promptTemplate: v })}
+              placeholder="vd: Mô tả chi tiết, viết prompt giống ảnh..."
+              rows={4}
+            />
+            <TextEdit
+              label="Gemini Cookies (paste JSON từ Cookie-Editor)"
+              value={(cfg.geminiCookies as string) ?? ''}
+              onChange={(v) => updateConfig(node.id, { geminiCookies: v })}
+              placeholder='[{"name":"SAPISID","value":"...","domain":".google.com",...}, ...]'
+              rows={6}
+              monospace
+            />
+            <Field label="Hướng dẫn">
+              Trong Brave có extension Cookie-Editor:
+              <br />1. Đăng nhập gemini.google.com
+              <br />2. Mở Cookie-Editor → Export → All cookies as JSON
+              <br />3. Paste vô field trên
+              <br />Hoặc bỏ trống → dùng cookies Veo3 đã có (cần đã login Google trên cùng profile).
+            </Field>
+            <Field label="Media input">
+              Cắm Upload Media / Generate Image vào port &quot;media N&quot;. File ≤50MB.
+            </Field>
+          </>
+        )}
+
         {type === 'generate_image' && (
           <>
             <Select

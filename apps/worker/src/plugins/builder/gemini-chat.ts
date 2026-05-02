@@ -23,8 +23,13 @@ export interface GeminiChatInput {
   mediaUrls: Array<{ url: string; kind: 'image' | 'video' }>;
   config: {
     promptTemplate?: string;
-    /** User-edited override — bypasses the chat call. */
+    /** User-edited output override — bypasses the chat call. */
     manualOutput?: string;
+    /** JSON array of cookies (Cookie-Editor export shape) for
+     *  gemini.google.com / .google.com — overlaid on the shared Veo3
+     *  session right before navigation. Lets user paste Gemini-specific
+     *  cookies per node without re-using Veo3 account meta. */
+    geminiCookies?: string;
   };
   /** Owner — used to claim the right cookies account. */
   userId: string;
@@ -80,10 +85,54 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
     const page = (lease.tm as any)._page;
     if (!page) throw new Error('gemini_chat: no browser page available');
 
+    // Per-node Gemini cookies — user pastes them in the editor panel.
+    // We layer them on top of the shared Veo3 session BEFORE navigating
+    // so the very first request to gemini.google.com is authenticated.
+    const cookieStr = input.config.geminiCookies?.trim();
+    if (cookieStr) {
+      try {
+        const parsed = JSON.parse(cookieStr);
+        if (Array.isArray(parsed)) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const cookieList = parsed.map((c: any) => ({
+            name: c.name,
+            value: c.value,
+            domain: c.domain ?? '.google.com',
+            path: c.path ?? '/',
+            expires: typeof c.expirationDate === 'number'
+              ? Math.floor(c.expirationDate)
+              : typeof c.expires === 'number'
+                ? c.expires
+                : undefined,
+            httpOnly: c.httpOnly ?? false,
+            secure: c.secure ?? true,
+            sameSite: c.sameSite === 'no_restriction' ? 'None' : c.sameSite,
+          }));
+          await page.setCookie(...cookieList);
+          logger.info({ count: cookieList.length }, 'gemini_chat: injected per-node Gemini cookies');
+        }
+      } catch (e) {
+        logger.warn(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          { err: (e as any)?.message ?? e },
+          'gemini_chat: geminiCookies JSON parse failed, falling back to shared session',
+        );
+      }
+    }
+
     // Navigate to gemini.google.com — cookies are already injected on the
     // shared Brave instance (Veo3 + Gemini share *.google.com session).
     logger.info('gemini_chat: navigate to gemini.google.com');
     await page.goto(GEMINI_URL, { waitUntil: 'domcontentloaded', timeout: 90_000 });
+
+    // Detect login redirect — surface a clear error so the user knows to
+    // paste cookies or login manually.
+    const finalUrl = page.url();
+    if (/accounts\.google\.com\/.*signin/.test(finalUrl)) {
+      throw new Error(
+        'gemini_chat: redirected to Google login. Paste Gemini cookies into "Gemini Cookies" field in the editor panel, or login manually one time in the Brave window worker spawned (cookies persist in the profile).',
+      );
+    }
 
     // Wait for the chat input to mount. Selectors covered: contenteditable
     // div with role=textbox, textarea, rich-textarea custom element.
