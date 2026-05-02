@@ -39,8 +39,15 @@ export function useWorkflowRun() {
           if (targetSet.has(n.id)) continue;
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const data = n.data as any;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const cfg = (data?.config ?? {}) as any;
           const cached: Record<string, unknown> = {};
-          if (typeof data?.lastOutputText === 'string' && data.lastOutputText.trim()) {
+          // For source nodes (prompt / upload_image) the live config is the
+          // truth — don't fall back to lastOutputText, which holds the stale
+          // value from a previous run after the user edited the textarea.
+          if (n.type === 'prompt' && typeof cfg.text === 'string' && cfg.text.trim()) {
+            cached.text = cfg.text;
+          } else if (typeof data?.lastOutputText === 'string' && data.lastOutputText.trim()) {
             cached.text = data.lastOutputText;
           }
           if (Array.isArray(data?.previewMedia) && data.previewMedia.length > 0) {
@@ -48,12 +55,6 @@ export function useWorkflowRun() {
             const first = data.previewMedia[0];
             if (first?.kind === 'video') cached.video = first.url;
             else if (first?.kind === 'image') cached.image = first.url;
-          }
-          // Also copy through pass-through outputs we know about.
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const cfg = (data?.config ?? {}) as any;
-          if (n.type === 'prompt' && typeof cfg.text === 'string') {
-            cached.text = cached.text ?? cfg.text;
           }
           if (n.type === 'upload_image' && typeof cfg.imageUrl === 'string' && cfg.imageUrl) {
             cached.image = cached.image ?? cfg.imageUrl;
