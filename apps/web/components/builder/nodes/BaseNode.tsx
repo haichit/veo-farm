@@ -107,39 +107,42 @@ export function BaseNode(props: BaseNodeProps) {
         ...(selected ? { borderColor: def.color } : {}),
       }}
     >
-      {/* Resize handle bottom-right corner — drag to enlarge for long prompts. */}
+      {/* Resize handles — subtle dot at each corner, thin line on the sides.
+          Only shown while node is selected. */}
       {!isFrame && (
         <NodeResizer
           isVisible={selected}
           minWidth={def.width}
           minHeight={def.minHeight}
           handleStyle={{
-            width: 10,
-            height: 10,
-            borderRadius: 2,
+            width: 6,
+            height: 6,
+            borderRadius: 999,
             background: def.color,
-            border: '1px solid #1a1a2e',
+            border: '1px solid rgba(255,255,255,0.15)',
+            opacity: 0.7,
           }}
-          lineStyle={{ borderColor: `${def.color}60` }}
+          lineStyle={{ borderColor: `${def.color}40`, borderWidth: 1 }}
         />
       )}
 
-      {/* Input handles (dynamic) */}
+      {/* Input handles (dynamic) — labels rendered OUTSIDE node on the left
+          so they never overlap textareas / chips inside the body. */}
       {dynamicInputs.map((port, i) => (
         <Handle
           key={inputHandleId(i)}
           type="target"
           position={Position.Left}
           id={inputHandleId(i)}
-          className="!w-[14px] !h-[14px]"
+          className="!w-[12px] !h-[12px]"
           style={{
-            top: 50 + i * 28,
+            top: 52 + i * 24,
             background: port.color,
             border: '2px solid #1a1a2e',
           }}
         >
           <span
-            className="absolute left-[14px] top-1/2 -translate-y-1/2 whitespace-nowrap pointer-events-none text-[10px] font-medium"
+            className="absolute right-[14px] top-1/2 -translate-y-1/2 whitespace-nowrap pointer-events-none text-[9px] font-medium"
             style={{ color: '#8888a0' }}
           >
             {port.name}
@@ -148,22 +151,22 @@ export function BaseNode(props: BaseNodeProps) {
         </Handle>
       ))}
 
-      {/* Output handles (static) */}
+      {/* Output handles (static) — labels rendered OUTSIDE node on the right. */}
       {def.outputs.map((port, i) => (
         <Handle
           key={outputHandleId(i)}
           type="source"
           position={Position.Right}
           id={outputHandleId(i)}
-          className="!w-[14px] !h-[14px]"
+          className="!w-[12px] !h-[12px]"
           style={{
-            top: 50 + i * 28,
+            top: 52 + i * 24,
             background: port.color,
             border: '2px solid #1a1a2e',
           }}
         >
           <span
-            className="absolute right-[14px] top-1/2 -translate-y-1/2 whitespace-nowrap pointer-events-none text-[10px] font-medium"
+            className="absolute left-[14px] top-1/2 -translate-y-1/2 whitespace-nowrap pointer-events-none text-[9px] font-medium"
             style={{ color: '#8888a0' }}
           >
             {port.name}
