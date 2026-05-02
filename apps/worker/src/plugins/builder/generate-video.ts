@@ -24,6 +24,26 @@ function mapAspect(ratio: string | undefined): '16:9' | '9:16' {
 
 // UI Veo model selection → ApiClient model family.
 // (Quality variants don't exist on the open Flow tier — fall back to fast.)
+// flow.google's uploadImage rejects with 400 when the declared mime doesn't
+// match the actual bytes. Sniff via URL extension first, then magic bytes.
+function mimeFromUrl(url: string, buf: Buffer): string {
+  const u = url.toLowerCase();
+  if (u.includes('.png')) return 'image/png';
+  if (u.includes('.webp')) return 'image/webp';
+  if (u.includes('.gif')) return 'image/gif';
+  if (u.includes('.jpg') || u.includes('.jpeg')) return 'image/jpeg';
+  // Magic-byte fallback for Supabase signed URLs (no extension in path).
+  if (buf.length >= 8) {
+    if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
+    if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+    if (
+      buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+      buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50
+    ) return 'image/webp';
+  }
+  return 'image/png';
+}
+
 function mapModel(
   videoModel: string | undefined,
 ): 'veo_3_1_lite' | 'veo_3_1_fast' | 'veo_3_1_quality' {
@@ -117,18 +137,18 @@ export async function runGenerateVideoNode(
     if (mode === 'FRAME') {
       if (input.refs?.startImageUrl) {
         const buf = await downloadFromUrl(input.refs.startImageUrl);
-        const up = await client.uploadImage(buf, 'image/jpeg');
+        const up = await client.uploadImage(buf, mimeFromUrl(input.refs.startImageUrl, buf));
         startImageId = up.mediaId;
       }
       if (input.refs?.endImageUrl) {
         const buf = await downloadFromUrl(input.refs.endImageUrl);
-        const up = await client.uploadImage(buf, 'image/jpeg');
+        const up = await client.uploadImage(buf, mimeFromUrl(input.refs.endImageUrl, buf));
         endImageId = up.mediaId;
       }
     } else if (mode === 'REF') {
       for (const url of input.refs?.referenceImageUrls ?? []) {
         const buf = await downloadFromUrl(url);
-        const up = await client.uploadImage(buf, 'image/jpeg');
+        const up = await client.uploadImage(buf, mimeFromUrl(url, buf));
         refMediaIds.push(up.mediaId);
       }
     }
