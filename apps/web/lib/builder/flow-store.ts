@@ -96,6 +96,11 @@ interface FlowStoreState {
   currentWorkflowName: string;
   savedWorkflows: SavedWorkflowSummary[];
 
+  /** Saved Gemini API key — auto-fill when user creates a new gemini_*
+   *  node, auto-update when user pastes key into any gemini node editor.
+   *  Persisted via the persist middleware so it survives F5. */
+  defaultGeminiApiKey: string;
+
   // Album overlay
   albumOpen: boolean;
   albumMedia: PreviewMedia[];
@@ -147,6 +152,7 @@ interface FlowStoreState {
 
   // ── Actions: persistence ──
   setCurrentWorkflow: (id: string | null, name: string) => void;
+  setDefaultGeminiApiKey: (key: string) => void;
   newWorkflow: () => void;
   refreshSavedWorkflows: () => Promise<void>;
   saveWorkflow: (name?: string) => Promise<void>;
@@ -220,6 +226,7 @@ export const useFlowStore = create<FlowStoreState>()(
   currentWorkflowId: null,
   currentWorkflowName: 'Workflow mới',
   savedWorkflows: [],
+  defaultGeminiApiKey: '',
 
   albumOpen: false,
   albumMedia: [],
@@ -256,11 +263,19 @@ export const useFlowStore = create<FlowStoreState>()(
     if (!def) throw new Error(`Unknown node type: ${type}`);
     get().pushHistory();
     const id = makeId(type);
+    // Auto-fill Gemini API key on new gemini_* nodes so user doesn't have
+    // to paste it every time. (gemini_prompt_kie uses a different vendor's
+    // key — skip auto-fill for that one.)
+    const config = { ...def.defaults } as Record<string, unknown>;
+    const savedGemini = get().defaultGeminiApiKey;
+    if (savedGemini && (type === 'gemini_prompt' || type === 'gemini_vision')) {
+      config.apiKey = savedGemini;
+    }
     const node: BuilderNode = {
       id,
       type,
       position,
-      data: { config: { ...def.defaults }, status: 'idle' },
+      data: { config, status: 'idle' },
       width: def.width,
       height: def.minHeight,
       // Frames render behind other nodes so children appear grouped within them.
@@ -440,6 +455,7 @@ export const useFlowStore = create<FlowStoreState>()(
 
   // ── Persistence ──
   setCurrentWorkflow: (id, name) => set({ currentWorkflowId: id, currentWorkflowName: name }),
+  setDefaultGeminiApiKey: (key) => set({ defaultGeminiApiKey: key.trim() }),
   newWorkflow: () =>
     set({
       nodes: [],
@@ -666,6 +682,7 @@ export const useFlowStore = create<FlowStoreState>()(
         edges: state.edges,
         currentWorkflowId: state.currentWorkflowId,
         currentWorkflowName: state.currentWorkflowName,
+        defaultGeminiApiKey: state.defaultGeminiApiKey,
       }),
       version: 2,
     },

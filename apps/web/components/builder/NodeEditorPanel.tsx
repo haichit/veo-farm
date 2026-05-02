@@ -28,6 +28,8 @@ export function NodeEditorPanel() {
   const updateConfig = useFlowStore((s) => s.updateNodeConfig);
   const removeNodes = useFlowStore((s) => s.removeNodes);
   const selectNode = useFlowStore((s) => s.selectNode);
+  const setDefaultGeminiApiKey = useFlowStore((s) => s.setDefaultGeminiApiKey);
+  const defaultGeminiApiKey = useFlowStore((s) => s.defaultGeminiApiKey);
 
   if (!selectedNodeId || !node) return null;
   const type = (node.type ?? 'prompt') as BuilderNodeType;
@@ -92,9 +94,14 @@ export function NodeEditorPanel() {
         {type === 'gemini_prompt' && (
           <>
             <TextEdit
-              label="API Key"
+              label={`API Key${defaultGeminiApiKey ? ' (đã lưu, dùng chung mọi node)' : ''}`}
               value={(cfg.apiKey as string) ?? ''}
-              onChange={(v) => updateConfig(node.id, { apiKey: v })}
+              onChange={(v) => {
+                updateConfig(node.id, { apiKey: v });
+                // Auto-save key as default so the next gemini_* node mày
+                // tạo sẽ tự fill, khỏi paste lại.
+                if (v.trim()) setDefaultGeminiApiKey(v);
+              }}
               placeholder="AIza..."
               rows={1}
               monospace
@@ -155,9 +162,12 @@ export function NodeEditorPanel() {
         {type === 'gemini_vision' && (
           <>
             <TextEdit
-              label="API Key (aistudio.google.com/apikey)"
+              label={`API Key (aistudio.google.com/apikey)${defaultGeminiApiKey ? ' — đã lưu, dùng chung' : ''}`}
               value={(cfg.apiKey as string) ?? ''}
-              onChange={(v) => updateConfig(node.id, { apiKey: v })}
+              onChange={(v) => {
+                updateConfig(node.id, { apiKey: v });
+                if (v.trim()) setDefaultGeminiApiKey(v);
+              }}
               placeholder="AIza..."
               rows={1}
               monospace
