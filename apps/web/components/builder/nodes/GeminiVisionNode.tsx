@@ -59,7 +59,7 @@ export function GeminiVisionNode(props: NodeProps) {
             )}
           </div>
           <textarea
-            value={cfg.manualOutput ?? lastOutput}
+            value={cfg.manualOutput || lastOutput}
             onChange={(e) => updateConfig(props.id, { manualOutput: e.target.value })}
             onMouseDown={(e) => e.stopPropagation()}
             placeholder="(output hiện sau khi Run)"
