@@ -175,6 +175,24 @@ function snapshot(state: Pick<FlowStoreState, 'nodes' | 'edges'>): HistorySnapsh
   };
 }
 
+// Drop fields whose value is a `data:` URL longer than 100KB — typically
+// a video the user dropped on upload_image. localStorage caps around 5MB
+// total so a single 50MB video data URL would crash setItem. Workflow
+// structure still persists; user just has to re-upload after F5.
+function stripBigBlobs(cfg: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(cfg)) {
+    if (typeof v === 'string' && v.startsWith('data:') && v.length > 100_000) {
+      // Mark as elided so UI can display "(uploaded file — re-pick after reload)"
+      out[k] = '';
+      out[`${k}__stripped`] = true;
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
 function shallowGraphEqual(a: HistorySnapshot, b: HistorySnapshot): boolean {
   return (
     a.nodes.length === b.nodes.length &&
@@ -603,23 +621,53 @@ export const useFlowStore = create<FlowStoreState>()(
   clearAlbum: () => set({ albumMedia: [] }),
     }),
     {
-      name: 'veo-farm:builder:v1',
-      storage: createJSONStorage(() => localStorage),
+      name: 'veo-farm:builder:v2',
+      // Catch QuotaExceededError so user doesn't get a full app crash if
+      // they paste a giant data URL into upload_image. Falls back to
+      // returning the input unchanged (skip the write).
+      storage: createJSONStorage(() => ({
+        getItem: (k) => {
+          try {
+            return localStorage.getItem(k);
+          } catch {
+            return null;
+          }
+        },
+        setItem: (k, v) => {
+          try {
+            localStorage.setItem(k, v);
+          } catch (e) {
+            // eslint-disable-next-line no-console
+            console.warn('[builder] localStorage quota exceeded, skipping autosave', e);
+          }
+        },
+        removeItem: (k) => {
+          try {
+            localStorage.removeItem(k);
+          } catch {
+            /* ignore */
+          }
+        },
+      })),
       // Only persist the user's workspace; skip transient run/realtime state
       // and server-cached lists (savedWorkflows is fetched fresh).
       partialize: (state) => ({
         nodes: state.nodes.map((n) => ({
           ...n,
           // Strip ephemeral status badges so a stale "running" doesn't
-          // reappear after reload.
-          data: { config: n.data?.config ?? {}, label: n.data?.label },
+          // reappear after reload. Also strip giant data: URLs from upload
+          // nodes — they blow past the 5MB localStorage quota for any
+          // non-trivial file. User will need to re-upload after reload.
+          data: {
+            config: stripBigBlobs(n.data?.config ?? {}),
+            label: n.data?.label,
+          },
         })),
         edges: state.edges,
         currentWorkflowId: state.currentWorkflowId,
         currentWorkflowName: state.currentWorkflowName,
       }),
-      // Restore versioning placeholder — bump if the persisted shape changes.
-      version: 1,
+      version: 2,
     },
   ),
 );
