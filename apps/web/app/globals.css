@@ -170,3 +170,13 @@
 .builder-canvas .react-flow__pane.dragging {
   cursor: grabbing;
 }
+
+/* Frame node always sits BELOW its child nodes regardless of selection.
+   Without this, clicking the frame to drag/resize promotes its z-index
+   above the children and visually covers them. */
+.builder-canvas .react-flow__node-frame {
+  z-index: -1 !important;
+}
+.builder-canvas .react-flow__node-frame.selected {
+  z-index: -1 !important;
+}

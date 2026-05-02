@@ -339,12 +339,16 @@ export const useFlowStore = create<FlowStoreState>()(
       // Convert into the new parent's local frame (or stay absolute).
       const nx = absX - (newParent?.position?.x ?? 0);
       const ny = absY - (newParent?.position?.y ?? 0);
+      // NOTE: do NOT set extent: 'parent' — React Flow clamps the child
+      // when parent moves/resizes which made our child positions go
+      // negative and the child rendered offscreen ("frame appears empty").
+      // parentId alone is enough to make the child move WITH the frame.
       return {
         nodes: s.nodes.map((n) =>
           n.id === nodeId
             ? newParentId
               ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                ({ ...n, position: { x: nx, y: ny }, parentId: newParentId, extent: 'parent', expandParent: false } as any)
+                ({ ...n, position: { x: nx, y: ny }, parentId: newParentId, extent: undefined, expandParent: false } as any)
               : // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 ({ ...n, position: { x: nx, y: ny }, parentId: undefined, extent: undefined } as any)
             : n,
