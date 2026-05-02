@@ -16,7 +16,7 @@ const flow = {
     { id: promptId, type: 'prompt', position: { x: 0, y: 0 },
       data: { config: { text: 'in 1 short sentence' } } },
     { id: chatId, type: 'gemini_chat', position: { x: 300, y: 0 },
-      data: { config: { promptTemplate: 'Trả lời 1 câu thật ngắn: 2+2 bằng mấy?' } } },
+      data: { config: { promptTemplate: 'Mô tả chi tiết nội dung trong media này. Đại hội Đảng. Trả lời đúng 1 câu thật ngắn không quá 20 chữ.' } } },
   ],
   edges: [
     { id: 'e1', source: promptId, target: chatId, sourceHandle: 'output-0', targetHandle: 'input-0' },

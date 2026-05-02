@@ -187,13 +187,64 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
       await new Promise((r) => setTimeout(r, 6000));
     }
 
-    // ─── Type the prompt ───
-    logger.info('gemini_chat: typing prompt');
+    // ─── Insert the prompt ───
+    // page.keyboard.type() drops/duplicates Vietnamese diacritics (composed
+    // chars get split into base+combining and the IME loses sync). Paste
+    // the text directly via the Clipboard API instead — atomic, no IME.
+    logger.info({ promptLen: userPrompt.length }, 'gemini_chat: inserting prompt');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const inputEl = await page.$(inputSel);
     if (!inputEl) throw new Error('gemini_chat: chat input not found');
     await inputEl.focus();
-    await page.keyboard.type(userPrompt, { delay: 5 });
+
+    // Grant clipboard permission to the page origin so navigator.clipboard works.
+    try {
+      const ctx = page.browserContext();
+      await ctx.overridePermissions('https://gemini.google.com', [
+        'clipboard-read',
+        'clipboard-write',
+      ]);
+    } catch {
+      /* non-fatal — fall back to execCommand path below */
+    }
+
+    const inserted = await page.evaluate(async (text: string, selector: string) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const doc: any = (globalThis as any).document;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const win: any = (globalThis as any).window;
+      const all = doc.querySelectorAll(selector);
+      const el = all[all.length - 1] ?? all[0];
+      if (!el) return false;
+      el.focus();
+      // Path 1: clipboard paste — most reliable for contenteditable + IME.
+      try {
+        await win.navigator.clipboard.writeText(text);
+        const ok = doc.execCommand('paste');
+        if (ok) return true;
+      } catch {
+        /* fall through */
+      }
+      // Path 2: insertText — works for both <textarea> and contenteditable.
+      try {
+        const ok = doc.execCommand('insertText', false, text);
+        if (ok) return true;
+      } catch {
+        /* fall through */
+      }
+      // Path 3: brute-force assignment + input event.
+      if ('value' in el) {
+        el.value = text;
+      } else {
+        el.textContent = text;
+      }
+      el.dispatchEvent(new win.Event('input', { bubbles: true }));
+      return true;
+    }, userPrompt, inputSel);
+
+    if (!inserted) throw new Error('gemini_chat: failed to insert prompt into chat input');
+    // Tiny settle so Gemini registers the input event before Enter.
+    await new Promise((r) => setTimeout(r, 200));
 
     // ─── Send ───
     logger.info('gemini_chat: sending');
