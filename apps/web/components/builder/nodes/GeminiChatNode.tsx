@@ -2,6 +2,7 @@
 
 import type { NodeProps } from '@xyflow/react';
 import { BaseNode } from './BaseNode';
+import { ConfigChip } from './ConfigChip';
 import { useFlowStore, type BuilderNodeData } from '@/lib/builder/flow-store';
 
 // Gemini Chat — drives gemini.google.com via cookies pool. No API key,
@@ -12,7 +13,10 @@ export function GeminiChatNode(props: NodeProps) {
   const cfg = ((props.data as any)?.config ?? {}) as {
     promptTemplate?: string;
     manualOutput?: string;
+    geminiCookies?: string;
+    model?: string;
   };
+  const hasCookies = !!cfg.geminiCookies?.trim();
   const data = props.data as BuilderNodeData;
   const lastOutput = data?.lastOutputText ?? '';
   const status = data?.status ?? 'idle';
@@ -20,6 +24,27 @@ export function GeminiChatNode(props: NodeProps) {
 
   return (
     <BaseNode {...props} runIcon="play">
+      <div className="flex flex-wrap gap-1.5">
+        <ConfigChip
+          value={cfg.model ?? 'auto'}
+          options={[
+            { value: 'auto', label: 'Auto' },
+            { value: 'flash', label: '2.5 Flash' },
+            { value: 'pro', label: '2.5 Pro' },
+          ]}
+          onChange={(v) => updateConfig(props.id, { model: v })}
+        />
+        <ConfigChip
+          value={hasCookies ? 'node' : 'shared'}
+          options={[
+            { value: 'shared', label: '🔗 Veo3 cookies' },
+            { value: 'node', label: '🍪 Custom (đã cài)' },
+          ]}
+          onChange={() => {
+            /* read-only display */
+          }}
+        />
+      </div>
       <textarea
         value={cfg.promptTemplate ?? ''}
         onChange={(e) => updateConfig(props.id, { promptTemplate: e.target.value })}

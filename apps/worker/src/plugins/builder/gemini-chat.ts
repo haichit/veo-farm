@@ -54,7 +54,17 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
     throw new Error('gemini_chat: prompt rỗng (cả template lẫn upstream text đều trống)');
   }
 
-  const account = await claimAccount(input.userId, 'veo3');
+  // Try a dedicated Gemini account first (provider 'gemini' on /accounts).
+  // Fall back to the shared Veo3 account if none — same Google session
+  // covers gemini.google.com when cookies span .google.com.
+  let account: Awaited<ReturnType<typeof claimAccount>>;
+  try {
+    account = await claimAccount(input.userId, 'gemini', 1);
+    logger.info({ accountId: account.id }, 'gemini_chat: using dedicated gemini account');
+  } catch {
+    account = await claimAccount(input.userId, 'veo3');
+    logger.info({ accountId: account.id }, 'gemini_chat: falling back to veo3 account');
+  }
   const cookies = decryptCookies(account);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const meta = (account.meta ?? {}) as Record<string, any>;
@@ -120,17 +130,22 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
       }
     }
 
-    // Navigate to gemini.google.com — cookies are already injected on the
-    // shared Brave instance (Veo3 + Gemini share *.google.com session).
-    logger.info('gemini_chat: navigate to gemini.google.com');
-    await page.goto(GEMINI_URL, { waitUntil: 'domcontentloaded', timeout: 90_000 });
+    // Skip re-navigation if we're already on gemini.google.com from a
+    // prior call — saves ~3-5s of page load on every subsequent run.
+    const currentUrl = page.url();
+    if (!/^https:\/\/gemini\.google\.com\//.test(currentUrl)) {
+      logger.info('gemini_chat: navigate to gemini.google.com');
+      await page.goto(GEMINI_URL, { waitUntil: 'domcontentloaded', timeout: 90_000 });
+    } else {
+      logger.info('gemini_chat: already on gemini.google.com, reusing tab');
+    }
 
     // Detect login redirect — surface a clear error so the user knows to
     // paste cookies or login manually.
     const finalUrl = page.url();
     if (/accounts\.google\.com\/.*signin/.test(finalUrl)) {
       throw new Error(
-        'gemini_chat: redirected to Google login. Paste Gemini cookies into "Gemini Cookies" field in the editor panel, or login manually one time in the Brave window worker spawned (cookies persist in the profile).',
+        'gemini_chat: redirected to Google login. Paste Gemini cookies into "Gemini Cookies" field in the editor panel, or add a Gemini account on /accounts.',
       );
     }
 
@@ -185,33 +200,53 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
     // Either Enter (most layouts) or click the send button.
     await page.keyboard.press('Enter');
 
-    // ─── Wait for response ───
-    // Heuristic: poll the latest model-response container for stable text
-    // (no change for >2s = streaming finished).
+    // ─── Wait for response — fast path ───
+    // Primary signal: the "Stop generating" button is present while
+    // streaming and removed when finished. That's instant detection.
+    // Fallback: poll text stability with shorter window.
     const respSel =
       'message-content, [data-test-id="response-message"], .response-container .markdown, model-response .markdown, .conversation-turn:last-of-type .response-content';
+    const stopBtnSel =
+      'button[aria-label*="stop" i], button[aria-label*="dừng" i], button[data-test-id="stop-button"]';
 
     const start = Date.now();
     let lastText = '';
     let stableSince = 0;
+    let sawStreaming = false;
     while (Date.now() - start < 120_000) {
-      await new Promise((r) => setTimeout(r, 1000));
-      const t = await page.evaluate((sel: string) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const all = (globalThis as any).document.querySelectorAll(sel);
-        if (!all || all.length === 0) return '';
-        const last = all[all.length - 1];
-        return (last?.innerText ?? '').trim();
-      }, respSel);
-      if (t && t.length > 5) {
-        if (t === lastText) {
+      await new Promise((r) => setTimeout(r, 350));
+      const probe = await page.evaluate(
+        (textSel: string, stopSel: string) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const doc: any = (globalThis as any).document;
+          const all = doc.querySelectorAll(textSel);
+          const last = all && all.length > 0 ? all[all.length - 1] : null;
+          const text = (last?.innerText ?? '').trim();
+          const stopBtn = doc.querySelector(stopSel);
+          return { text, streaming: !!stopBtn };
+        },
+        respSel,
+        stopBtnSel,
+      );
+
+      if (probe.streaming) sawStreaming = true;
+
+      if (probe.text && probe.text.length > 3) {
+        // Fast-path: we observed the stop button at least once and now
+        // it's gone → streaming definitely finished.
+        if (sawStreaming && !probe.streaming) {
+          logger.info({ outLen: probe.text.length, ms: Date.now() - start }, 'gemini_chat: streaming flag cleared');
+          return { text: probe.text };
+        }
+        // Fallback stability check (shorter 1s window).
+        if (probe.text === lastText) {
           if (stableSince === 0) stableSince = Date.now();
-          if (Date.now() - stableSince > 2500) {
-            logger.info({ outLen: t.length }, 'gemini_chat: response stable, returning');
-            return { text: t };
+          if (Date.now() - stableSince > 1000) {
+            logger.info({ outLen: probe.text.length, ms: Date.now() - start }, 'gemini_chat: text stable');
+            return { text: probe.text };
           }
         } else {
-          lastText = t;
+          lastText = probe.text;
           stableSince = 0;
         }
       }
