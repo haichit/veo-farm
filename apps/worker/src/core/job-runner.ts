@@ -718,6 +718,29 @@ function resolveVideoRefs(
   return { startImageUrl, endImageUrl };
 }
 
+// Returns the list of Start-Frame images when an upstream generate_image
+// (or any node emitting media[]) has more than one. Fan-out runs the
+// downstream node once per image with the same prompt.
+function resolveStartImageList(
+  incoming: Array<{ source: string; targetHandle?: string }>,
+  outputs: Map<string, unknown>,
+): string[] | null {
+  for (const e of incoming) {
+    if (e.targetHandle !== 'input-1') continue;
+    const up = outputs.get(e.source);
+    if (!up || typeof up !== 'object') continue;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const o = up as any;
+    if (Array.isArray(o.media) && o.media.length > 1) {
+      const urls = o.media
+        .filter((m: { url?: string; kind?: string }) => m?.url && m.kind !== 'video')
+        .map((m: { url: string }) => m.url);
+      if (urls.length > 1) return urls;
+    }
+  }
+  return null;
+}
+
 async function executeBuilderNode(
   node: { id: string; type: string; data?: { config?: Record<string, unknown> } },
   incoming: Array<{ source: string; targetHandle?: string }>,
@@ -781,6 +804,58 @@ async function executeBuilderNode(
     const { runGenerateVideoNode } = await import('../plugins/builder/generate-video.js');
     const refs = resolveVideoRefs(incoming, outputs, (cfg.videoMode as string) ?? 'FRAME');
     const promptList = resolvePromptList(incoming, outputs);
+    const imageList = resolveStartImageList(incoming, outputs);
+
+    // Fan-out across N start-frame images (same prompt, different keyframes).
+    // Useful for Setup B: 1 prompt + N images → N videos.
+    if ((!promptList || promptList.length <= 1) && imageList && imageList.length > 1) {
+      const prompt = resolvePrompt(node, incoming, outputs);
+      const allMedia: Array<Record<string, unknown>> = [];
+      for (let i = 0; i < imageList.length; i++) {
+        logger.info({ index: i + 1, total: imageList.length, image: imageList[i].slice(0, 60) }, 'generate_video: image fan-out');
+        const out = await runGenerateVideoNode({
+          prompt,
+          config: {
+            ratio: cfg.ratio as string | undefined,
+            quantity: cfg.quantity as number | undefined,
+            quality: cfg.quality as string | undefined,
+            videoModel: cfg.videoModel as string | undefined,
+            videoMode: cfg.videoMode as string | undefined,
+            duration: cfg.duration as number | undefined,
+          },
+          refs: { ...refs, startImageUrl: imageList[i] },
+          userId: job.user_id,
+          jobId: job.id,
+        });
+        for (const m of out.media) allMedia.push(m as Record<string, unknown>);
+      }
+      return { media: allMedia, video: (allMedia[0] as { url?: string })?.url };
+    }
+
+    // Zip fan-out: prompt[i] + image[i] when both lists are present and same length.
+    if (promptList && imageList && promptList.length === imageList.length && promptList.length > 1) {
+      const allMedia: Array<Record<string, unknown>> = [];
+      for (let i = 0; i < promptList.length; i++) {
+        logger.info({ index: i + 1, total: promptList.length }, 'generate_video: zip fan-out');
+        const out = await runGenerateVideoNode({
+          prompt: promptList[i],
+          config: {
+            ratio: cfg.ratio as string | undefined,
+            quantity: cfg.quantity as number | undefined,
+            quality: cfg.quality as string | undefined,
+            videoModel: cfg.videoModel as string | undefined,
+            videoMode: cfg.videoMode as string | undefined,
+            duration: cfg.duration as number | undefined,
+          },
+          refs: { ...refs, startImageUrl: imageList[i] },
+          userId: job.user_id,
+          jobId: job.id,
+        });
+        for (const m of out.media) allMedia.push(m as Record<string, unknown>);
+      }
+      return { media: allMedia, video: (allMedia[0] as { url?: string })?.url };
+    }
+
     if (promptList && promptList.length > 1) {
       const allMedia: Array<Record<string, unknown>> = [];
       for (let i = 0; i < promptList.length; i++) {
