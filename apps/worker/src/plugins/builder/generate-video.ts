@@ -227,9 +227,19 @@ export async function runGenerateVideoNode(
       leaseHeld = false;
     }
     await dropTokenManager(account.id);
+
+    const msg = (err as Error)?.message ?? String(err);
+    if (/AUTH_ERROR_401|UNAUTHENTICATED/.test(msg)) {
+      logger.warn({ accountId: account.id }, 'generate_video: marking account expired (401)');
+      await releaseAccount(account.id, 0, 'expired');
+    } else {
+      await releaseAccount(account.id, 0, 'idle');
+    }
     throw err;
   } finally {
-    if (leaseHeld) lease.release();
-    await releaseAccount(account.id, 0, 'idle');
+    if (leaseHeld) {
+      lease.release();
+      await releaseAccount(account.id, 0, 'idle');
+    }
   }
 }

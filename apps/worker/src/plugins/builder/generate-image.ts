@@ -154,9 +154,22 @@ export async function runGenerateImageNode(
       leaseHeld = false;
     }
     await dropTokenManager(account.id);
+
+    // 401 on the Flow API means the cookies are no longer good for OAuth.
+    // Mark the account expired so claimAccount stops picking it and the
+    // user can re-login from /accounts.
+    const msg = (err as Error)?.message ?? String(err);
+    if (/AUTH_ERROR_401|UNAUTHENTICATED/.test(msg)) {
+      logger.warn({ accountId: account.id }, 'generate_image: marking account expired (401)');
+      await releaseAccount(account.id, 0, 'expired');
+    } else {
+      await releaseAccount(account.id, 0, 'idle');
+    }
     throw err;
   } finally {
-    if (leaseHeld) lease.release();
-    await releaseAccount(account.id, 0, 'idle');
+    if (leaseHeld) {
+      lease.release();
+      await releaseAccount(account.id, 0, 'idle');
+    }
   }
 }
