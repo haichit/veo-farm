@@ -62,10 +62,20 @@ export async function runGeminiVisionNode(
   }
 
   const model = input.config.model?.trim() || 'gemini-2.5-flash';
-  const tmpl = input.config.promptTemplate?.trim() || 'Mô tả chi tiết nội dung trong media này.';
-  const userPrompt = tmpl.includes('{{text}}')
-    ? tmpl.replace(/\{\{text\}\}/g, input.text ?? '')
-    : (tmpl + (input.text ? `\n\n${input.text}` : '')).trim();
+  const tmpl = input.config.promptTemplate?.trim() ?? '';
+  const upstream = (input.text ?? '').trim();
+  let userPrompt: string;
+  if (tmpl && tmpl.includes('{{text}}')) {
+    userPrompt = tmpl.replace(/\{\{text\}\}/g, upstream);
+  } else if (tmpl) {
+    userPrompt = upstream ? `${tmpl}\n\n${upstream}` : tmpl;
+  } else {
+    userPrompt = upstream;
+  }
+  userPrompt = userPrompt.trim();
+  if (!userPrompt) {
+    throw new Error('gemini_vision: prompt rỗng (cả template lẫn upstream text đều trống)');
+  }
 
   // 1) Upload each media URL.
   logger.info(

@@ -14,9 +14,9 @@ const flow = {
   executionOrder: [promptId, chatId],
   nodes: [
     { id: promptId, type: 'prompt', position: { x: 0, y: 0 },
-      data: { config: { text: 'in 1 short sentence' } } },
+      data: { config: { text: 'Hãy lặp lại y nguyên đoạn sau, không thêm bớt: "Tổng Bí thư Tô Lâm của Việt Nam đang phát biểu trang trọng tại đại hội đảng — đoàn kết, dân chủ, kỷ cương, sáng tạo, phát triển."' } } },
     { id: chatId, type: 'gemini_chat', position: { x: 300, y: 0 },
-      data: { config: { promptTemplate: 'hình meme tổng bí thư tô lâm của việt nam đang phát biểu trang trọng tại đại hội đảng. Trả lời đúng prompt mày vừa nhận được, copy nguyên văn không thêm gì.' } } },
+      data: { config: { promptTemplate: '' } } },
   ],
   edges: [
     { id: 'e1', source: promptId, target: chatId, sourceHandle: 'output-0', targetHandle: 'input-0' },

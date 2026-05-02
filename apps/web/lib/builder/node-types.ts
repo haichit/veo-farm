@@ -132,7 +132,7 @@ export const NODE_TYPES: Record<BuilderNodeType, NodeTypeDef> = {
     inputs: [{ name: 'text', type: 'string', color: PORT_COLORS.string, optional: true }],
     outputs: [{ name: 'text', type: 'string', color: PORT_COLORS.string }],
     defaults: {
-      promptTemplate: 'Mô tả chi tiết nội dung trong media này.',
+      promptTemplate: '',
     },
     width: 280,
     minHeight: 130,
@@ -150,7 +150,7 @@ export const NODE_TYPES: Record<BuilderNodeType, NodeTypeDef> = {
     defaults: {
       apiKey: '',
       model: 'gemini-2.5-flash',
-      promptTemplate: 'Mô tả chi tiết nội dung trong media này.',
+      promptTemplate: '',
     },
     width: 280,
     minHeight: 130,

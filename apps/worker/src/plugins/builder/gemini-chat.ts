@@ -46,10 +46,17 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
     return { text: override };
   }
 
-  const tmpl = input.config.promptTemplate?.trim() || 'Mô tả chi tiết nội dung trong media này.';
-  const userPrompt = tmpl.includes('{{text}}')
-    ? tmpl.replace(/\{\{text\}\}/g, input.text ?? '')
-    : (tmpl + (input.text ? `\n\n${input.text}` : '')).trim();
+  const tmpl = input.config.promptTemplate?.trim() ?? '';
+  const upstream = (input.text ?? '').trim();
+  let userPrompt: string;
+  if (tmpl && tmpl.includes('{{text}}')) {
+    userPrompt = tmpl.replace(/\{\{text\}\}/g, upstream);
+  } else if (tmpl) {
+    userPrompt = upstream ? `${tmpl}\n\n${upstream}` : tmpl;
+  } else {
+    userPrompt = upstream;
+  }
+  userPrompt = userPrompt.trim();
   if (!userPrompt) {
     throw new Error('gemini_chat: prompt rỗng (cả template lẫn upstream text đều trống)');
   }
@@ -208,128 +215,70 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
       await new Promise((r) => setTimeout(r, 6000));
     }
 
-    // ─── Insert the prompt ───
-    // page.keyboard.type() drops/duplicates Vietnamese diacritics (composed
-    // chars get split into base+combining and the IME loses sync). Paste
-    // the text directly via the Clipboard API instead — atomic, no IME.
-    logger.info({ promptLen: userPrompt.length }, 'gemini_chat: inserting prompt');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const inputEl = await page.$(inputSel);
-    if (!inputEl) throw new Error('gemini_chat: chat input not found');
-    await inputEl.focus();
-
-    // Grant clipboard permission to the page origin so navigator.clipboard works.
-    try {
-      const ctx = page.browserContext();
-      await ctx.overridePermissions('https://gemini.google.com', [
-        'clipboard-read',
-        'clipboard-write',
-      ]);
-    } catch {
-      /* non-fatal — fall back to execCommand path below */
-    }
-
-    const inserted = await page.evaluate(async (text: string, selector: string) => {
+    // ─── Dismiss any pre-existing starter prompt / suggestion chips ───
+    // Gemini's empty-state shows a list of clickable suggestion chips (and
+    // sometimes a banner) — clicking outside or pressing Escape doesn't
+    // remove them, but they don't actually populate the input until clicked.
+    // What we DO need to defend against: a stale draft in the input from
+    // a previous run. Hard-clear it.
+    await page.evaluate((selector: string) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const doc: any = (globalThis as any).document;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const win: any = (globalThis as any).window;
       const all = doc.querySelectorAll(selector);
       const el = all[all.length - 1] ?? all[0];
-      if (!el) return false;
+      if (!el) return;
       el.focus();
-
-      // Read final text out of the DOM after insertion to verify.
-      const readBack = (): string => {
-        if ('value' in el && typeof el.value === 'string') return el.value;
-        return (el.innerText ?? el.textContent ?? '').replace(/​/g, '');
-      };
-
-      // Path 1: synthesize a real ClipboardEvent('paste') with DataTransfer.
-      // Most contenteditable handlers (Angular/Lit/Quill — Gemini uses one)
-      // listen for 'paste' and consume the whole text atomically. This is
-      // how real Cmd+V works and avoids any per-char IME race.
-      try {
-        const dt = new win.DataTransfer();
-        dt.setData('text/plain', text);
-        const evt = new win.ClipboardEvent('paste', {
-          clipboardData: dt,
-          bubbles: true,
-          cancelable: true,
-        });
-        el.dispatchEvent(evt);
-        // Give Gemini a tick to commit the paste into the editor model.
-        await new Promise((r) => setTimeout(r, 50));
-        if (readBack().trim().length >= text.trim().length) return true;
-      } catch {
-        /* fall through */
-      }
-
-      // Path 2: clipboard.writeText + execCommand('paste').
-      try {
-        await win.navigator.clipboard.writeText(text);
-        const ok = doc.execCommand('paste');
-        await new Promise((r) => setTimeout(r, 50));
-        if (ok && readBack().trim().length >= text.trim().length) return true;
-      } catch {
-        /* fall through */
-      }
-
-      // Path 3: execCommand('insertText') — last resort.
-      try {
-        doc.execCommand('insertText', false, text);
-        await new Promise((r) => setTimeout(r, 50));
-        if (readBack().trim().length >= text.trim().length) return true;
-      } catch {
-        /* fall through */
-      }
-
-      // Path 4: direct assignment (textarea only) — definitely loses
-      // contenteditable framework state but at least gets full text in.
-      if ('value' in el) {
-        el.value = text;
-        el.dispatchEvent(new win.Event('input', { bubbles: true }));
-        return true;
-      }
-      // Path 5: contenteditable manual node injection.
-      const range = doc.createRange();
-      el.innerHTML = '';
-      const p = doc.createElement('p');
-      p.textContent = text;
-      el.appendChild(p);
-      range.selectNodeContents(el);
-      range.collapse(false);
-      const sel = win.getSelection();
-      sel?.removeAllRanges();
-      sel?.addRange(range);
-      el.dispatchEvent(new win.InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
-      return true;
-    }, userPrompt, inputSel);
-
-    if (!inserted) throw new Error('gemini_chat: failed to insert prompt into chat input');
-    // Tiny settle so Gemini registers the input event before Enter.
-    await new Promise((r) => setTimeout(r, 200));
-
-    // Verify the chat input actually contains our full prompt before pressing
-    // Enter. If chars were dropped, abort with a useful error rather than
-    // sending a corrupted question and getting a confused response.
-    const actualPrompt = await page.evaluate((selector: string) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const doc: any = (globalThis as any).document;
-      const all = doc.querySelectorAll(selector);
-      const el = all[all.length - 1] ?? all[0];
-      if (!el) return '';
-      if ('value' in el && typeof el.value === 'string') return el.value;
-      // eslint-disable-next-line no-irregular-whitespace
-      return (el.innerText ?? el.textContent ?? '').replace(/​/g, '').trim();
+      if ('value' in el) el.value = '';
+      else { while (el.firstChild) el.removeChild(el.firstChild); }
+      el.dispatchEvent(new win.Event('input', { bubbles: true }));
     }, inputSel);
+
+    // ─── Insert the prompt via CDP Input.insertText ───
+    // This is the ONLY method that's atomic and IME-safe across all editor
+    // frameworks (Angular/Lit/contenteditable). It sends an IME-commit-style
+    // text input event directly to the focused element — same path real
+    // keyboard composition uses, no per-char race, no DataTransfer mocking.
+    // page.keyboard.type drops Vietnamese diacritics; execCommand and
+    // ClipboardEvent paths are inconsistent across Gemini's editor versions.
+    logger.info({ promptLen: userPrompt.length }, 'gemini_chat: inserting prompt via CDP');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const inputEl = await page.$(inputSel);
+    if (!inputEl) throw new Error('gemini_chat: chat input not found');
+    await inputEl.focus();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cdpClient: any = await (page.target() as any).createCDPSession();
+    try {
+      await cdpClient.send('Input.insertText', { text: userPrompt });
+    } finally {
+      try { await cdpClient.detach(); } catch { /* ignore */ }
+    }
+    await new Promise((r) => setTimeout(r, 250));
+
+    // Verify the chat input actually contains our full prompt. If CDP
+    // insertText was rejected (rare — happens when focus shifted), retry
+    // once via direct DOM injection.
+    const readActual = async (): Promise<string> =>
+      await page.evaluate((selector: string) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const doc: any = (globalThis as any).document;
+        const all = doc.querySelectorAll(selector);
+        const el = all[all.length - 1] ?? all[0];
+        if (!el) return '';
+        if ('value' in el && typeof el.value === 'string') return el.value;
+        // eslint-disable-next-line no-irregular-whitespace
+        return (el.innerText ?? el.textContent ?? '').replace(/​/g, '');
+      }, inputSel);
+
+    let actualPrompt = (await readActual()).trim();
     const expected = userPrompt.trim();
-    if (actualPrompt.trim() !== expected) {
+    if (actualPrompt !== expected) {
       logger.warn(
-        { expectedLen: expected.length, actualLen: actualPrompt.length, expectedHead: expected.slice(0, 40), actualHead: actualPrompt.slice(0, 40) },
-        'gemini_chat: prompt round-trip mismatch — retrying with fallback paste',
+        { expectedLen: expected.length, actualLen: actualPrompt.length, expectedHead: expected.slice(0, 60), actualHead: actualPrompt.slice(0, 60) },
+        'gemini_chat: CDP insertText round-trip mismatch — retrying via DOM injection',
       );
-      // Force-clear and retry via direct DOM injection (path 5 in inserter).
       await page.evaluate((text: string, selector: string) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const doc: any = (globalThis as any).document;
@@ -340,10 +289,9 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
         if (!el) return;
         el.focus();
         if ('value' in el) {
-          el.value = '';
           el.value = text;
         } else {
-          el.innerHTML = '';
+          while (el.firstChild) el.removeChild(el.firstChild);
           const p = doc.createElement('p');
           p.textContent = text;
           el.appendChild(p);
@@ -357,7 +305,16 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
         el.dispatchEvent(new win.InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
       }, userPrompt, inputSel);
       await new Promise((r) => setTimeout(r, 300));
+      actualPrompt = (await readActual()).trim();
+      if (actualPrompt !== expected) {
+        logger.error(
+          { expectedLen: expected.length, actualLen: actualPrompt.length, actualHead: actualPrompt.slice(0, 80) },
+          'gemini_chat: prompt insertion failed even after fallback',
+        );
+        throw new Error('gemini_chat: failed to insert full prompt into chat input');
+      }
     }
+    logger.info({ len: expected.length }, 'gemini_chat: prompt verified in input');
 
     // ─── Send ───
     logger.info('gemini_chat: sending');
