@@ -1,6 +1,7 @@
 'use client';
 
-import { Play, Pause, Square, Image as ImageIcon, ZoomIn, RotateCcw } from 'lucide-react';
+import { useState } from 'react';
+import { Play, Pause, Save, Square, Image as ImageIcon, ZoomIn, RotateCcw } from 'lucide-react';
 import { useReactFlow } from '@xyflow/react';
 import { useFlowStore } from '@/lib/builder/flow-store';
 import type { WorkflowJSON } from '@veo-farm/shared';
@@ -21,7 +22,26 @@ export function BuilderToolbar() {
   const edges = useFlowStore((s) => s.edges);
   const currentWorkflowId = useFlowStore((s) => s.currentWorkflowId);
   const currentWorkflowName = useFlowStore((s) => s.currentWorkflowName);
+  const setCurrentWorkflow = useFlowStore((s) => s.setCurrentWorkflow);
+  const saveWorkflow = useFlowStore((s) => s.saveWorkflow);
   const { fitView } = useReactFlow();
+  const [saving, setSaving] = useState(false);
+
+  async function onSaveClick() {
+    let name = currentWorkflowName;
+    if (!currentWorkflowId) {
+      const proposed = window.prompt('Tên workflow để lưu:', name || 'Workflow mới');
+      if (!proposed) return;
+      name = proposed.trim() || name;
+      setCurrentWorkflow(null, name);
+    }
+    setSaving(true);
+    try {
+      await saveWorkflow(name);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function startRun() {
     if (nodes.length === 0) {
@@ -112,6 +132,17 @@ export function BuilderToolbar() {
       >
         <Play size={16} />
         Chạy Workflow
+      </button>
+
+      <button
+        type="button"
+        onClick={onSaveClick}
+        disabled={saving}
+        title={currentWorkflowId ? `Lưu thay đổi vào "${currentWorkflowName}"` : 'Lưu workflow lần đầu (sẽ hỏi tên)'}
+        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-semibold bg-gradient-to-br from-success to-[#059669] text-white disabled:opacity-50 hover:opacity-90 transition-all"
+      >
+        <Save size={15} />
+        {saving ? 'Đang lưu…' : 'Lưu'}
       </button>
 
       {runState === 'running' && (
