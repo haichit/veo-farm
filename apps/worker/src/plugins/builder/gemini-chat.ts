@@ -103,13 +103,39 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
     if (!page) throw new Error('gemini_chat: no browser page available');
 
     // Per-node Gemini cookies — user pastes them in the editor panel.
-    // We layer them on top of the shared Veo3 session BEFORE navigating
-    // so the very first request to gemini.google.com is authenticated.
+    // BEFORE setting new cookies, clear stale .google.com cookies from the
+    // Brave profile. Otherwise Brave reads expired session cookies from
+    // disk and they take precedence on the first request to gemini.google.com,
+    // landing us on the login page even when the user just pasted fresh
+    // cookies.
     const cookieStr = input.config.geminiCookies?.trim();
     if (cookieStr) {
       try {
         const parsed = JSON.parse(cookieStr);
         if (Array.isArray(parsed)) {
+          // Wipe existing google.com cookies first (CDP Network.clearBrowserCookies
+          // is too aggressive — drops Veo3 too. Use deleteCookie per current cookie
+          // matching .google.com).
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const existing = await (page as any).cookies('https://gemini.google.com', 'https://accounts.google.com');
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            for (const c of existing as any[]) {
+              if (typeof c.domain === 'string' && c.domain.includes('google.com')) {
+                try {
+                  await page.deleteCookie({ name: c.name, domain: c.domain, path: c.path });
+                } catch { /* ignore individual failures */ }
+              }
+            }
+            logger.info({ cleared: (existing as any[]).length }, 'gemini_chat: cleared stale google.com cookies');
+          } catch (e) {
+            logger.warn(
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              { err: (e as any)?.message ?? e },
+              'gemini_chat: clearing stale cookies failed (continuing)',
+            );
+          }
+
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const cookieList = parsed.map((c: any) => ({
             name: c.name,
@@ -126,7 +152,22 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
             sameSite: c.sameSite === 'no_restriction' ? 'None' : c.sameSite,
           }));
           await page.setCookie(...cookieList);
-          logger.info({ count: cookieList.length }, 'gemini_chat: injected per-node Gemini cookies');
+          // Sanity log: which auth-critical cookies we now have.
+          const names = cookieList.map((c: { name: string }) => c.name);
+          const hasSession =
+            names.includes('SAPISID') ||
+            names.includes('__Secure-1PSID') ||
+            names.includes('__Secure-3PSID') ||
+            names.includes('SID');
+          logger.info(
+            { count: cookieList.length, hasSession, sample: names.slice(0, 8) },
+            'gemini_chat: injected per-node Gemini cookies',
+          );
+          if (!hasSession) {
+            logger.warn(
+              'gemini_chat: pasted cookies missing session keys (SAPISID / __Secure-1PSID / SID). Re-export khi login gemini.google.com active tab.',
+            );
+          }
         }
       } catch (e) {
         logger.warn(
@@ -190,39 +231,51 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
     if (input.mediaUrls && input.mediaUrls.length > 0) {
       logger.info({ count: input.mediaUrls.length }, 'gemini_chat: attaching media');
 
-      // Verify the page actually finished loading before probing the DOM —
-      // page.goto returns on domcontentloaded but Angular's shell may still
-      // be mounting. Wait for the upload trigger or sign-in button to be
-      // present before deciding which path to take.
+      // Verify the page actually finished loading before probing the DOM.
+      // Critical: prefer waiting for the UPLOAD button specifically, with
+      // a longer timeout. The sign-in button is sometimes rendered briefly
+      // as a splash before the authed shell takes over — relying on either-
+      // or matching here causes false-positive "logged out" failures.
       try {
         await page.waitForFunction(
           () => {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const doc: any = (globalThis as any).document;
-            const uploadBtn =
+            return !!(
               doc.querySelector('button[aria-controls="upload-file-menu"]') ||
               doc.querySelector('button.upload-card-button') ||
               doc.querySelector('button[aria-label*="upload" i]') ||
-              doc.querySelector('input[type="file"]');
-            const signInBtn =
-              doc.querySelector('button.sign-in-button') ||
-              doc.querySelector('a[href*="ServiceLogin"]');
-            return !!(uploadBtn || signInBtn);
+              doc.querySelector('input[type="file"]')
+            );
           },
-          { timeout: 20_000 },
+          { timeout: 25_000 },
         );
       } catch {
-        /* fall through — let downstream probe report the real state */
+        // Upload button never showed up — likely truly logged out, but
+        // double-check below before throwing.
       }
 
-      // Detect logged-out state up-front, before chasing missing selectors.
-      const isLoggedOut = await page.evaluate(() => {
+      // Detect logged-out state — only after the page has had a chance to
+      // load. Re-check by url too: a real logout redirects to accounts.google.com.
+      const url = page.url();
+      const isLoggedOut = /accounts\.google\.com\/.*signin/i.test(url) ||
+        /accounts\.google\.com\/.*ServiceLogin/i.test(url) ||
+        await page.evaluate(() => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const doc: any = (globalThis as any).document;
+        // Only treat as logged-out when the sign-in CTA is the dominant
+        // affordance AND we don't see any authed-only element. Authed
+        // gemini.google.com renders the chat composer (rich-textarea) and
+        // the sidebar — if either is present, the user IS logged in.
+        const hasComposer = !!(
+          doc.querySelector('rich-textarea div[contenteditable="true"]') ||
+          doc.querySelector('div[contenteditable="true"][role="textbox"]') ||
+          doc.querySelector('side-nav-menu-button')
+        );
+        if (hasComposer) return false;
         return !!(
           doc.querySelector('button.sign-in-button') ||
-          doc.querySelector('a[href*="ServiceLogin"]') ||
-          doc.querySelector('a[href*="accounts.google.com"]')
+          doc.querySelector('a[href*="ServiceLogin"]')
         );
       });
       if (isLoggedOut) {
