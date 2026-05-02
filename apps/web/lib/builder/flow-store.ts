@@ -15,6 +15,7 @@
 // here. Worker integration consumes /api/run-workflow-builder.
 
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import type { Edge, Node, XYPosition } from '@xyflow/react';
 import { applyEdgeChanges, applyNodeChanges } from '@xyflow/react';
 import type { EdgeChange, NodeChange, Connection } from '@xyflow/react';
@@ -182,7 +183,9 @@ function shallowGraphEqual(a: HistorySnapshot, b: HistorySnapshot): boolean {
 
 // ─── Store factory ────────────────────────────────────────────────────────────
 
-export const useFlowStore = create<FlowStoreState>((set, get) => ({
+export const useFlowStore = create<FlowStoreState>()(
+  persist(
+    (set, get) => ({
   nodes: [],
   edges: [],
 
@@ -589,4 +592,25 @@ export const useFlowStore = create<FlowStoreState>((set, get) => ({
   pushAlbumMedia: (media) =>
     set((s) => ({ albumMedia: [...s.albumMedia, ...media] })),
   clearAlbum: () => set({ albumMedia: [] }),
-}));
+    }),
+    {
+      name: 'veo-farm:builder:v1',
+      storage: createJSONStorage(() => localStorage),
+      // Only persist the user's workspace; skip transient run/realtime state
+      // and server-cached lists (savedWorkflows is fetched fresh).
+      partialize: (state) => ({
+        nodes: state.nodes.map((n) => ({
+          ...n,
+          // Strip ephemeral status badges so a stale "running" doesn't
+          // reappear after reload.
+          data: { config: n.data?.config ?? {}, label: n.data?.label },
+        })),
+        edges: state.edges,
+        currentWorkflowId: state.currentWorkflowId,
+        currentWorkflowName: state.currentWorkflowName,
+      }),
+      // Restore versioning placeholder — bump if the persisted shape changes.
+      version: 1,
+    },
+  ),
+);
