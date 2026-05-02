@@ -27,8 +27,46 @@ import { NODE_TYPES, type BuilderNodeType } from '@/lib/builder/node-types';
 export function BuilderCanvas() {
   const nodes = useFlowStore((s) => s.nodes);
   const edges = useFlowStore((s) => s.edges);
-  const onNodesChange = useFlowStore((s) => s.onNodesChange);
+  const baseOnNodesChange = useFlowStore((s) => s.onNodesChange);
+  const setNodes = useFlowStore((s) => s.setNodes);
   const onEdgesChange = useFlowStore((s) => s.onEdgesChange);
+
+  // Wrap onNodesChange so a frame's position delta also shifts every node
+  // whose data.frameId points at this frame. Children "move with frame".
+  const onNodesChange = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (changes: any[]) => {
+      const allNodes = useFlowStore.getState().nodes;
+      // Detect frame position deltas in this batch.
+      const frameDeltas = new Map<string, { dx: number; dy: number }>();
+      for (const c of changes) {
+        if (c?.type !== 'position' || !c.position || !c.id) continue;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const orig = allNodes.find((n: any) => n.id === c.id);
+        if (!orig || orig.type !== 'frame') continue;
+        const dx = c.position.x - (orig.position?.x ?? 0);
+        const dy = c.position.y - (orig.position?.y ?? 0);
+        if (dx !== 0 || dy !== 0) frameDeltas.set(c.id, { dx, dy });
+      }
+      // Apply the standard React Flow change first.
+      baseOnNodesChange(changes);
+      if (frameDeltas.size === 0) return;
+      // Then shift every child of those frames by the same delta.
+      const after = useFlowStore.getState().nodes.map((n) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const fid = (n.data as any)?.frameId as string | undefined;
+        if (!fid || !frameDeltas.has(fid)) return n;
+        const d = frameDeltas.get(fid)!;
+        return {
+          ...n,
+          position: { x: n.position.x + d.dx, y: n.position.y + d.dy },
+        };
+      });
+      setNodes(after);
+    },
+    [baseOnNodesChange, setNodes],
+  );
+
   const onConnect = useFlowStore((s) => s.onConnect);
   const setEdges = useFlowStore((s) => s.setEdges);
   const addNode = useFlowStore((s) => s.addNode);

@@ -48,6 +48,8 @@ export interface BuilderNodeData extends Record<string, unknown> {
   previewMedia?: PreviewMedia[];
   /** Last text output from gemini_prompt / prompt nodes (post-success). */
   lastOutputText?: string;
+  /** Frame membership — when set, frame's drag delta propagates to this node. */
+  frameId?: string;
   /** Last error message (renders red status dot). */
   error?: string;
   label?: string;
@@ -325,32 +327,31 @@ export const useFlowStore = create<FlowStoreState>()(
     }));
   },
   setNodeParent: (nodeId, newParentId) =>
+    // Membership tracked in node.data.frameId — keeps React Flow's own
+    // parentId mechanism out of it because RF's behaviour with relative
+    // positions + dynamic re-parenting was unreliable. BuilderCanvas
+    // handles "move children with frame" manually via onNodesChange
+    // delta-propagation.
     set((s) => {
       const node = s.nodes.find((n) => n.id === nodeId);
       if (!node) return {};
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const oldParentId = (node as any).parentId as string | undefined;
-      if (oldParentId === (newParentId ?? undefined)) return {};
-      const oldParent = oldParentId ? s.nodes.find((n) => n.id === oldParentId) : null;
-      const newParent = newParentId ? s.nodes.find((n) => n.id === newParentId) : null;
-      // Compute current absolute screen position.
-      const absX = (oldParent?.position?.x ?? 0) + node.position.x;
-      const absY = (oldParent?.position?.y ?? 0) + node.position.y;
-      // Convert into the new parent's local frame (or stay absolute).
-      const nx = absX - (newParent?.position?.x ?? 0);
-      const ny = absY - (newParent?.position?.y ?? 0);
-      // NOTE: do NOT set extent: 'parent' — React Flow clamps the child
-      // when parent moves/resizes which made our child positions go
-      // negative and the child rendered offscreen ("frame appears empty").
-      // parentId alone is enough to make the child move WITH the frame.
+      const currentFrameId = (node.data as BuilderNodeData)?.frameId as string | undefined;
+      if ((currentFrameId ?? null) === (newParentId ?? null)) return {};
       return {
         nodes: s.nodes.map((n) =>
           n.id === nodeId
-            ? newParentId
-              ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                ({ ...n, position: { x: nx, y: ny }, parentId: newParentId, extent: undefined, expandParent: false } as any)
-              : // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                ({ ...n, position: { x: nx, y: ny }, parentId: undefined, extent: undefined } as any)
+            ? {
+                ...n,
+                // Drop any leftover RF parentId/extent from earlier attempts.
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                parentId: undefined as any,
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                extent: undefined as any,
+                data: {
+                  ...n.data,
+                  frameId: newParentId ?? undefined,
+                },
+              }
             : n,
         ),
       };
