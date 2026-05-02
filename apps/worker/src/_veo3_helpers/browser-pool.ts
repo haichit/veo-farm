@@ -108,11 +108,12 @@ export async function acquireTokenManager(opts: AcquireOptions): Promise<Acquire
     const tmAny = slot.tm as any;
     const page = tmAny._page;
     const browser = tmAny._browser;
-    const dead =
+    let dead =
       !page ||
       !browser ||
       browser.isConnected?.() === false ||
       page.isClosed?.() === true ||
+      page.mainFrame?.()?.isDetached?.() === true ||
       (() => {
         try {
           const u = page.url();
@@ -121,6 +122,18 @@ export async function acquireTokenManager(opts: AcquireOptions): Promise<Acquire
           return true;
         }
       })();
+    // Active liveness probe — `isConnected` can lag for ~10s after Brave
+    // is force-killed externally. A 1s evaluate flushes the truth.
+    if (!dead && page) {
+      try {
+        await Promise.race([
+          page.evaluate('1'),
+          new Promise((_, rj) => setTimeout(() => rj(new Error('probe timeout')), 1500)),
+        ]);
+      } catch {
+        dead = true;
+      }
+    }
     if (dead) {
       logger.warn(
         { accountId: opts.accountId },
