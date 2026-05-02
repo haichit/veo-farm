@@ -228,7 +228,38 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
         logger.info({ clickedSel }, 'gemini_chat: plus button click result');
 
         if (!clickedSel) {
-          throw new Error('gemini_chat: không tìm thấy nút upload trên Gemini UI.');
+          // Dump current DOM so we can update selectors without re-running.
+          try {
+            const html = await page.content();
+            const debugFile = `/tmp/gemini-chat-upload-debug-${Date.now()}.html`;
+            writeFileSync(debugFile, html);
+            // Also dump every button's aria-label / class / text — easier to scan.
+            const btnList = await page.evaluate(() => {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const doc: any = (globalThis as any).document;
+              return [...doc.querySelectorAll('button')]
+                .filter((b: HTMLButtonElement) => {
+                  const rect = b.getBoundingClientRect();
+                  return rect.width > 0 && rect.height > 0;
+                })
+                .slice(0, 40)
+                .map((b: HTMLButtonElement) => ({
+                  aria: b.getAttribute('aria-label'),
+                  cls: b.className.slice(0, 80),
+                  controls: b.getAttribute('aria-controls'),
+                  text: (b.innerText || '').trim().slice(0, 30),
+                }));
+            });
+            const btnFile = `/tmp/gemini-chat-buttons-${Date.now()}.json`;
+            writeFileSync(btnFile, JSON.stringify(btnList, null, 2));
+            logger.warn(
+              { debugFile, btnFile, count: btnList.length },
+              'gemini_chat: upload button not matched — DOM + buttons dumped',
+            );
+          } catch { /* ignore */ }
+          throw new Error(
+            'gemini_chat: không tìm thấy nút upload trên Gemini UI. Đã dump DOM vào /tmp/gemini-chat-upload-debug-*.html và /tmp/gemini-chat-buttons-*.json.',
+          );
         }
 
         // Step 2: wait for the menu to open. The button toggles
@@ -248,40 +279,57 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
         await new Promise((r) => setTimeout(r, 300));
 
         // Step 3: click the menu item that opens the file picker. Gemini
-        // currently labels this "Tệp" / "Files" / "Upload files from device".
-        // Skip Drive/Photos items (cloud picker triggers a different dialog).
-        const menuItemKeywords = [
-          'upload files', 'upload file', 'tải tệp lên', 'tải lên tệp',
-          'tải tệp', 'tệp từ thiết bị', 'from this device', 'từ thiết bị',
-          'tệp', 'files',
-        ];
-        const skipKeywords = ['drive', 'photos', 'ảnh google', 'ảnh từ', 'youtube'];
+        // exposes a stable hook: data-test-id="local-images-files-uploader-button"
+        // — confirmed in DOM dump 2026-05-03. Try that exact selector first
+        // via real mouse click (Angular Material menu items also need real
+        // pointer events). Fall back to text/icon heuristics.
         try {
-          const menuClicked = await page.evaluate(
-            (keywords: string[], skips: string[]) => {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const doc: any = (globalThis as any).document;
-              const candidates: HTMLElement[] = [
-                ...doc.querySelectorAll(
-                  '[role="menuitem"], [mat-menu-item], button[role="menuitem"], .mat-mdc-menu-item, .mat-menu-item',
-                ),
-              ] as HTMLElement[];
-              for (const el of candidates) {
-                const text = (el.innerText || el.textContent || '').toLowerCase().trim();
-                if (!text) continue;
-                if (skips.some((s) => text.includes(s))) continue;
-                if (keywords.some((k) => text.includes(k))) {
-                  el.click();
-                  return text.slice(0, 50);
+          const exactSel = '[data-test-id="local-images-files-uploader-button"]';
+          const exact = await page.$(exactSel);
+          if (exact) {
+            await exact.click({ delay: 50 });
+            logger.info({ via: 'data-test-id' }, 'gemini_chat: upload menu item clicked');
+            await new Promise((r) => setTimeout(r, 500));
+          } else {
+            // Fallback: scan menu items for the right label / icon.
+            const menuItemKeywords = [
+              'upload files', 'upload file', 'tải tệp lên', 'tải lên tệp',
+              'tải tệp', 'tệp từ thiết bị', 'from this device', 'từ thiết bị',
+              'tệp', 'files',
+            ];
+            const skipKeywords = ['drive', 'photos', 'ảnh google', 'ảnh từ', 'youtube'];
+            const menuClicked = await page.evaluate(
+              (keywords: string[], skips: string[]) => {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const doc: any = (globalThis as any).document;
+                const candidates: HTMLElement[] = [
+                  ...doc.querySelectorAll(
+                    '[role="menuitem"], [mat-menu-item], button[role="menuitem"], .mat-mdc-menu-item, .mat-menu-item, [mat-list-item]',
+                  ),
+                ] as HTMLElement[];
+                for (const el of candidates) {
+                  // Prefer the "attach_file" icon — that's always the local
+                  // file uploader item.
+                  if (el.querySelector('[fonticon="attach_file"]')) {
+                    el.click();
+                    return 'icon:attach_file';
+                  }
+                  const text = (el.innerText || el.textContent || '').toLowerCase().trim();
+                  if (!text) continue;
+                  if (skips.some((s) => text.includes(s))) continue;
+                  if (keywords.some((k) => text.includes(k))) {
+                    el.click();
+                    return text.slice(0, 50);
+                  }
                 }
-              }
-              return null;
-            },
-            menuItemKeywords,
-            skipKeywords,
-          );
-          logger.info({ menuClicked }, 'gemini_chat: upload menu item');
-          if (menuClicked) await new Promise((r) => setTimeout(r, 500));
+                return null;
+              },
+              menuItemKeywords,
+              skipKeywords,
+            );
+            logger.info({ menuClicked }, 'gemini_chat: upload menu item (fallback)');
+            if (menuClicked) await new Promise((r) => setTimeout(r, 500));
+          }
         } catch { /* ignore */ }
       }
 
