@@ -26,9 +26,6 @@ importers:
       7zip-bin:
         specifier: ^5.2.0
         version: 5.2.0
-      '@veo-farm/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
       electron-log:
         specifier: ^5.1.0
         version: 5.4.3

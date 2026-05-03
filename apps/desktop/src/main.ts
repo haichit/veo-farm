@@ -49,6 +49,8 @@ function resolveResource(rel: string): string {
       return path.join(repoRoot, 'apps', 'web', '.next', 'standalone');
     case 'worker':
       return path.join(repoRoot, 'apps', 'worker', 'dist');
+    case 'shared':
+      return path.join(repoRoot, 'packages', 'shared', 'dist');
     case 'ffmpeg':
       // No bundled ffmpeg in dev — fall back to system PATH (`ffmpeg` from brew).
       return path.join(repoRoot, 'apps', 'desktop', 'vendor', 'ffmpeg');
@@ -141,8 +143,36 @@ async function startEmbeddedServer(): Promise<string> {
   const workerEntry = path.join(resolveResource('worker'), 'index.js');
   if (fs.existsSync(workerEntry)) {
     const bravePath = detectBraveExe();
+    // Build a node_modules-shaped folder pointer so worker dist can resolve
+    // `@veo-farm/shared` even though it isn't a real npm dep of apps/desktop.
+    // We synthesise the layout at boot if it doesn't exist yet.
+    const sharedDistDir = resolveResource('shared');
+    const synthNodeModules = path.join(app.getPath('userData'), 'node_modules');
+    try {
+      const sharedLink = path.join(synthNodeModules, '@veo-farm', 'shared');
+      if (fs.existsSync(sharedDistDir)) {
+        fs.mkdirSync(path.dirname(sharedLink), { recursive: true });
+        // Mirror the package.json + dist layout so Node sees a valid module.
+        fs.rmSync(sharedLink, { recursive: true, force: true });
+        fs.mkdirSync(sharedLink, { recursive: true });
+        fs.cpSync(sharedDistDir, path.join(sharedLink, 'dist'), { recursive: true });
+        fs.writeFileSync(
+          path.join(sharedLink, 'package.json'),
+          JSON.stringify({
+            name: '@veo-farm/shared',
+            version: '0.1.0',
+            main: './dist/index.js',
+          }),
+        );
+      }
+    } catch (e) {
+      log.warn('synth @veo-farm/shared failed', (e as Error).message);
+    }
     spawnChild('worker', process.execPath, [workerEntry], {
       ELECTRON_RUN_AS_NODE: '1',
+      // NODE_PATH lets worker `require('@veo-farm/shared')` find the
+      // synthesised module above without modifying its source.
+      NODE_PATH: synthNodeModules,
       ...RUNTIME_ENV,
       ...(bravePath ? { BRAVE_PATH: bravePath } : {}),
       FFMPEG_PATH: path.join(
@@ -246,21 +276,50 @@ function setupAutoUpdate() {
   }
   autoUpdater.logger = log;
   autoUpdater.autoDownload = true;
+  // Auto-install when the user quits the app — guarantees no in-progress
+  // canvas state is lost. If they never quit we still nudge them via the
+  // toast below.
   autoUpdater.autoInstallOnAppQuit = true;
 
   autoUpdater.on('update-available', (info) => {
     log.info('update-available', info?.version);
   });
 
-  // Silent auto-install: as soon as the new exe is fully downloaded we quit
-  // and re-install. The renderer doesn't get a "Restart?" prompt — by the
-  // time the user notices the app blink they're already on the new version.
-  // The "vừa cập nhật" banner is then handled by the just-updated detector
-  // below (writes ?updated=<old>→<new> into the loadURL).
-  autoUpdater.on('update-downloaded', (info) => {
-    log.info('update-downloaded', info?.version, '→ silent install');
-    // First arg = isSilent (no install wizard UI), second = isForceRunAfter.
-    setImmediate(() => autoUpdater.quitAndInstall(true, true));
+  // Update is fully downloaded but we DON'T quit immediately — the user may
+  // be mid-edit on an unsaved workflow. Instead show a non-modal notification:
+  // "ready to install on next quit" with an optional 'Restart now' button.
+  // The actual install happens automatically when the user Cmd+Q's the app
+  // (autoInstallOnAppQuit above).
+  autoUpdater.on('update-downloaded', async (info) => {
+    log.info('update-downloaded', info?.version, '→ deferred install');
+    if (!mainWindow) return;
+    // Native macOS/Windows notification — appears in corner, doesn't block.
+    try {
+      const { Notification } = await import('electron');
+      if (Notification.isSupported()) {
+        const n = new Notification({
+          title: `Veo Farm — bản v${info?.version} đã tải xong`,
+          body: 'Sẽ tự cài khi bạn đóng app. Bấm để cài ngay (LƯU workflow trước!).',
+        });
+        n.on('click', async () => {
+          if (!mainWindow) return autoUpdater.quitAndInstall(true, true);
+          const res = await dialog.showMessageBox(mainWindow, {
+            type: 'warning',
+            title: 'Restart để cập nhật?',
+            message: `App sẽ đóng và cài v${info?.version} ngay.`,
+            detail:
+              'Mọi workflow CHƯA bấm "Lưu" sẽ MẤT. Hãy chắc chắn đã lưu trước khi bấm Restart.',
+            buttons: ['Restart ngay', 'Để khi đóng app'],
+            defaultId: 1,
+            cancelId: 1,
+          });
+          if (res.response === 0) autoUpdater.quitAndInstall(true, true);
+        });
+        n.show();
+      }
+    } catch (e) {
+      log.warn('notification failed', (e as Error).message);
+    }
   });
   autoUpdater.on('error', (err) => log.error('updater error', err));
 
