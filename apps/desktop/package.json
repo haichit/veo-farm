@@ -1,6 +1,6 @@
 {
   "name": "@veo-farm/desktop",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "private": true,
   "description": "Veo Farm — Electron desktop shell",
   "main": "dist/main.js",
@@ -83,6 +83,11 @@
       {
         "from": "../worker/package.json",
         "to": "worker/package.json"
+      },
+      {
+        "from": "node_modules",
+        "to": "worker/node_modules",
+        "filter": ["**/*", "!.cache/**", "!**/*.md", "!**/test/**", "!**/tests/**", "!**/.bin/electron*", "!electron/**", "!electron-builder/**", "!electron-updater/**"]
       },
       {
         "from": "../../packages/shared/dist",

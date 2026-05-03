@@ -129,31 +129,34 @@ const RUNTIME_ENV = {
 let currentWorkerUserId: string | null = null;
 let workerChild: ChildProcess | null = null;
 
-function buildSharedPackageStub(): string {
-  // Build a node_modules-shaped folder so worker dist can resolve
-  // `@veo-farm/shared` even though it isn't a real npm dep of apps/desktop.
+function ensureSharedPackageInWorkerNodeModules(workerDir: string): void {
+  // Worker dist imports `@veo-farm/shared` (a workspace package not present
+  // in apps/desktop's npm dependencies). Synthesise the package directly
+  // INSIDE worker/node_modules so the ESM resolver finds it via the normal
+  // node_modules walk from worker/core/logger.js (NODE_PATH does not work
+  // for ESM in Node 18+).
   const sharedDistDir = resolveResource('shared');
-  const synthNodeModules = path.join(app.getPath('userData'), 'node_modules');
+  if (!fs.existsSync(sharedDistDir)) {
+    log.warn(`shared dist dir missing at ${sharedDistDir} — workspace import will fail`);
+    return;
+  }
   try {
-    const sharedLink = path.join(synthNodeModules, '@veo-farm', 'shared');
-    if (fs.existsSync(sharedDistDir)) {
-      fs.mkdirSync(path.dirname(sharedLink), { recursive: true });
-      fs.rmSync(sharedLink, { recursive: true, force: true });
-      fs.mkdirSync(sharedLink, { recursive: true });
-      fs.cpSync(sharedDistDir, path.join(sharedLink, 'dist'), { recursive: true });
-      fs.writeFileSync(
-        path.join(sharedLink, 'package.json'),
-        JSON.stringify({
-          name: '@veo-farm/shared',
-          version: '0.1.0',
-          main: './dist/index.js',
-        }),
-      );
-    }
+    const target = path.join(workerDir, 'node_modules', '@veo-farm', 'shared');
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.rmSync(target, { recursive: true, force: true });
+    fs.mkdirSync(target, { recursive: true });
+    fs.cpSync(sharedDistDir, path.join(target, 'dist'), { recursive: true });
+    fs.writeFileSync(
+      path.join(target, 'package.json'),
+      JSON.stringify({
+        name: '@veo-farm/shared',
+        version: '0.1.0',
+        main: './dist/index.js',
+      }),
+    );
   } catch (e) {
     log.warn('synth @veo-farm/shared failed', (e as Error).message);
   }
-  return synthNodeModules;
 }
 
 function spawnWorker(userId: string | null) {
@@ -167,34 +170,20 @@ function spawnWorker(userId: string | null) {
     workerChild = null;
   }
 
-  const workerEntry = path.join(resolveResource('worker'), 'index.js');
+  const workerDir = resolveResource('worker');
+  const workerEntry = path.join(workerDir, 'index.js');
   if (!fs.existsSync(workerEntry)) {
     log.warn(`worker entry not found at ${workerEntry} — skipping`);
     return;
   }
   const bravePath = detectBraveExe();
-  const synthNodeModules = buildSharedPackageStub();
+  ensureSharedPackageInWorkerNodeModules(workerDir);
 
-  // node_modules path resolution:
-  // - Packaged: deps are unpacked from app.asar to app.asar.unpacked/node_modules
-  //   (asarUnpack: ["node_modules/**/*"] in electron-builder config). Worker
-  //   subprocess is plain Node — can't read asar — so we point NODE_PATH at
-  //   the unpacked filesystem path.
-  // - Dev: deps are at the monorepo root node_modules.
-  const packedNodeModules = app.isPackaged
-    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules')
-    : path.join(__dirname, '..', '..', '..', 'node_modules');
-  // Multi-path NODE_PATH (delimiter: ; on Win, : elsewhere) — synth folder
-  // hosts @veo-farm/shared, packed folder hosts pino/supabase/etc.
-  const sep = process.platform === 'win32' ? ';' : ':';
-  const nodePath = [synthNodeModules, packedNodeModules].join(sep);
-
-  log.info('spawning worker', { userId: userId ?? '(none)', nodePath });
+  log.info('spawning worker', { userId: userId ?? '(none)', workerDir });
   const child = spawn(process.execPath, [workerEntry], {
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
-      NODE_PATH: nodePath,
       ...RUNTIME_ENV,
       ...(bravePath ? { BRAVE_PATH: bravePath } : {}),
       FFMPEG_PATH: path.join(
