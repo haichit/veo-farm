@@ -36,12 +36,25 @@ async function findOpenPort(): Promise<number> {
 }
 
 function resolveResource(rel: string): string {
-  // In packaged app, extraResources land in process.resourcesPath; in dev,
-  // we walk up from this file to the monorepo root.
+  // In packaged app, extraResources land at process.resourcesPath/<rel>.
+  // In dev, we map the same logical names to the monorepo source layout so
+  // `pnpm start` Just Works without packaging.
   if (app.isPackaged) {
     return path.join(process.resourcesPath, rel);
   }
-  return path.join(__dirname, '..', '..', '..', rel);
+  // __dirname = apps/desktop/dist → repo root is 3 levels up.
+  const repoRoot = path.join(__dirname, '..', '..', '..');
+  switch (rel) {
+    case 'web':
+      return path.join(repoRoot, 'apps', 'web', '.next', 'standalone');
+    case 'worker':
+      return path.join(repoRoot, 'apps', 'worker', 'dist');
+    case 'ffmpeg':
+      // No bundled ffmpeg in dev — fall back to system PATH (`ffmpeg` from brew).
+      return path.join(repoRoot, 'apps', 'desktop', 'vendor', 'ffmpeg');
+    default:
+      return path.join(repoRoot, rel);
+  }
 }
 
 function detectBraveExe(): string | null {
@@ -92,14 +105,21 @@ function killChildren() {
 
 let mainWindow: BrowserWindow | null = null;
 
-// Supabase config — anon key is designed to be exposed (RLS enforces auth);
-// hard-coded so packaged exe doesn't need .env on the user's machine. Service
-// role key is NOT bundled — only worker needs it and worker reads from Supabase
-// via anon-key after the user logs in.
-const SUPABASE_ENV = {
+// Bundled config. Anon key is designed to be exposed (RLS enforces auth).
+// Service role key + encryption key are needed by API routes that:
+//   - encrypt cookies stored in `accounts` table (AES-256-GCM)
+//   - admin endpoints that bypass RLS to list all users
+// They are bundled here so packaged exe works without .env on user machines.
+// Risk: anyone unpacking the asar can extract them — acceptable for current
+// internal-use scope.
+const RUNTIME_ENV = {
   NEXT_PUBLIC_SUPABASE_URL: 'https://ogcsrvdfxtxcpaogplph.supabase.co',
   NEXT_PUBLIC_SUPABASE_ANON_KEY:
     'sb_publishable_whdqQ22dJXtZfIs1nxcliw_vq3qQ7sw',
+  SUPABASE_SERVICE_ROLE_KEY: 'sb_secret_Dd3Z-AxtnhQLUM_Ge1Au2A_AOuBDp3m',
+  SUPABASE_STORAGE_BUCKET: 'media',
+  ENCRYPTION_KEY:
+    '6af4c1daf0ecd35176810c3457aa8b8f1a4583a04881235d3ca198866bdd3de3',
 };
 
 async function startEmbeddedServer(): Promise<string> {
@@ -114,7 +134,7 @@ async function startEmbeddedServer(): Promise<string> {
     HOSTNAME: '127.0.0.1',
     NODE_ENV: 'production',
     ELECTRON_RUN_AS_NODE: '1',
-    ...SUPABASE_ENV,
+    ...RUNTIME_ENV,
   });
 
   // Worker — long-lived background process.
@@ -123,8 +143,8 @@ async function startEmbeddedServer(): Promise<string> {
     const bravePath = detectBraveExe();
     spawnChild('worker', process.execPath, [workerEntry], {
       ELECTRON_RUN_AS_NODE: '1',
-      ...SUPABASE_ENV,
-      ...(bravePath ? { BRAVE_BROWSER_PATH: bravePath } : {}),
+      ...RUNTIME_ENV,
+      ...(bravePath ? { BRAVE_PATH: bravePath } : {}),
       FFMPEG_PATH: path.join(
         resolveResource('ffmpeg'),
         process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg',
@@ -181,7 +201,21 @@ async function createWindow() {
     },
   });
 
-  mainWindow.loadURL(url);
+  // Tag the initial URL with ?updated=<from>→<to> when a fresh install was
+  // just completed by the auto-updater so the renderer can show a "remember
+  // to save your workflow" banner.
+  const updateInfo = detectJustUpdated();
+  let loadUrl = url;
+  if (updateInfo.updated) {
+    const params = new URLSearchParams({
+      updated: '1',
+      from: updateInfo.from ?? '',
+      to: updateInfo.to,
+    });
+    loadUrl = `${url}/?${params.toString()}`;
+    log.info('app launched after update', updateInfo);
+  }
+  mainWindow.loadURL(loadUrl);
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -217,23 +251,42 @@ function setupAutoUpdate() {
   autoUpdater.on('update-available', (info) => {
     log.info('update-available', info?.version);
   });
-  autoUpdater.on('update-downloaded', async (info) => {
-    log.info('update-downloaded', info?.version);
-    if (!mainWindow) return;
-    const res = await dialog.showMessageBox(mainWindow, {
-      type: 'info',
-      title: 'Update sẵn sàng',
-      message: `Phiên bản mới ${info?.version} đã tải xong. Restart để cập nhật?`,
-      buttons: ['Restart ngay', 'Để sau'],
-      defaultId: 0,
-    });
-    if (res.response === 0) autoUpdater.quitAndInstall();
+
+  // Silent auto-install: as soon as the new exe is fully downloaded we quit
+  // and re-install. The renderer doesn't get a "Restart?" prompt — by the
+  // time the user notices the app blink they're already on the new version.
+  // The "vừa cập nhật" banner is then handled by the just-updated detector
+  // below (writes ?updated=<old>→<new> into the loadURL).
+  autoUpdater.on('update-downloaded', (info) => {
+    log.info('update-downloaded', info?.version, '→ silent install');
+    // First arg = isSilent (no install wizard UI), second = isForceRunAfter.
+    setImmediate(() => autoUpdater.quitAndInstall(true, true));
   });
   autoUpdater.on('error', (err) => log.error('updater error', err));
 
-  // First check on launch + every hour.
+  // First check on launch + every 30 min so users get fixes faster.
   autoUpdater.checkForUpdatesAndNotify().catch(() => {});
-  setInterval(() => autoUpdater.checkForUpdatesAndNotify().catch(() => {}), 60 * 60 * 1000);
+  setInterval(() => autoUpdater.checkForUpdatesAndNotify().catch(() => {}), 30 * 60 * 1000);
+}
+
+// Compare the current app version against the last version we recorded on
+// disk. If they differ → user just survived an auto-update → tell the
+// renderer via a query param so it can show "remember to save your workflow".
+function detectJustUpdated(): { updated: boolean; from?: string; to: string } {
+  const versionFile = path.join(app.getPath('userData'), 'last-version.txt');
+  const current = app.getVersion();
+  let prev: string | undefined;
+  try {
+    if (fs.existsSync(versionFile)) prev = fs.readFileSync(versionFile, 'utf8').trim();
+  } catch {
+    /* ignore */
+  }
+  try {
+    fs.writeFileSync(versionFile, current);
+  } catch (e) {
+    log.warn('cannot persist last-version.txt', (e as Error).message);
+  }
+  return { updated: !!prev && prev !== current, from: prev, to: current };
 }
 
 // ─── Lifecycle ──────────────────────────────────────────────────────────────

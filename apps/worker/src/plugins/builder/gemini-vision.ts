@@ -55,11 +55,17 @@ export async function runGeminiVisionNode(
       'gemini_vision: API Key chưa cài. Mở editor panel và paste key từ aistudio.google.com/apikey',
     );
   }
-  if (!input.mediaUrls || input.mediaUrls.length === 0) {
+  // Common mistake: pasting cookies JSON or random text into the API Key
+  // field. Google keys start with "AIzaSy" and are ~39 chars — quick reject.
+  if (!/^AIza[\w-]{30,}$/.test(apiKey)) {
     throw new Error(
-      'gemini_vision: chưa có media input (kết nối Upload Media hoặc Generate Image vào port "media")',
+      'gemini_vision: API Key không đúng format (phải bắt đầu bằng "AIzaSy..."). Lấy key tại aistudio.google.com/apikey',
     );
   }
+  // Media is optional — if no Upload/Generate Image is wired, fall back to a
+  // text-only generateContent call (same behaviour as Gemini Prompt). User
+  // can still benefit from the vision model's reasoning on text-only prompts.
+  const hasMedia = !!(input.mediaUrls && input.mediaUrls.length > 0);
 
   const model = input.config.model?.trim() || 'gemini-2.5-flash';
   const tmpl = input.config.promptTemplate?.trim() ?? '';
@@ -77,27 +83,31 @@ export async function runGeminiVisionNode(
     throw new Error('gemini_vision: prompt rỗng (cả template lẫn upstream text đều trống)');
   }
 
-  // 1) Upload each media URL.
-  logger.info(
-    { count: input.mediaUrls.length, model },
-    'gemini_vision: uploading media to Files API',
-  );
+  // 1) Upload each media URL (skip if text-only).
   const uploaded: UploadedFile[] = [];
-  for (const m of input.mediaUrls) {
-    const buffer = await downloadFromUrl(m.url);
-    const mime = inferMime(m.url, m.kind);
-    if (buffer.byteLength > 50 * 1024 * 1024) {
-      throw new Error(
-        `gemini_vision: file ${m.url.slice(-30)} > 50MB — Files API chỉ nhận ≤50MB, dùng video ngắn hơn`,
-      );
+  if (hasMedia) {
+    logger.info(
+      { count: input.mediaUrls!.length, model },
+      'gemini_vision: uploading media to Files API',
+    );
+    for (const m of input.mediaUrls!) {
+      const buffer = await downloadFromUrl(m.url);
+      const mime = inferMime(m.url, m.kind);
+      if (buffer.byteLength > 50 * 1024 * 1024) {
+        throw new Error(
+          `gemini_vision: file ${m.url.slice(-30)} > 50MB — Files API chỉ nhận ≤50MB, dùng video ngắn hơn`,
+        );
+      }
+      const file = await uploadToFilesApi(apiKey, buffer, mime);
+      uploaded.push(file);
     }
-    const file = await uploadToFilesApi(apiKey, buffer, mime);
-    uploaded.push(file);
-  }
 
-  // 2) Wait for ACTIVE state (videos need transcoding, images instant).
-  for (const f of uploaded) {
-    await waitForActive(apiKey, f.name);
+    // 2) Wait for ACTIVE state (videos need transcoding, images instant).
+    for (const f of uploaded) {
+      await waitForActive(apiKey, f.name);
+    }
+  } else {
+    logger.info({ model }, 'gemini_vision: text-only mode (no media wired)');
   }
 
   // 3) Call generateContent.
@@ -109,15 +119,21 @@ export async function runGeminiVisionNode(
   }
 
   logger.info({ parts: parts.length, model }, 'gemini_vision: calling generateContent');
+  // Set Content-Length explicitly — undici sometimes uses chunked encoding for
+  // small POST bodies, which Google's edge rejects with HTTP 411.
+  const reqBody = JSON.stringify({
+    contents: [{ role: 'user', parts }],
+    generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
+  });
   const r = await fetch(
     `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts }],
-        generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
-      }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': String(Buffer.byteLength(reqBody, 'utf8')),
+      },
+      body: reqBody,
     },
   );
   if (!r.ok) {

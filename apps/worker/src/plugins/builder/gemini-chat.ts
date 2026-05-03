@@ -614,8 +614,41 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
 
     // ─── Send ───
     logger.info('gemini_chat: sending');
-    // Either Enter (most layouts) or click the send button.
+    // Try Enter first (works for most layouts). If after 2s the "stop"
+    // streaming button hasn't appeared, fall back to clicking the send
+    // button — the textarea may be in multi-line mode where Enter inserts
+    // a newline instead of submitting.
     await page.keyboard.press('Enter');
+
+    const sendBtnSel =
+      'button[aria-label*="send" i], button[aria-label*="gửi" i], button[data-test-id="send-button"], button[mattooltip*="send" i]';
+    const stopBtnSel =
+      'button[aria-label*="stop" i], button[aria-label*="dừng" i], button[data-test-id="stop-button"]';
+
+    await new Promise((r) => setTimeout(r, 2000));
+    const streamingStarted = await page.evaluate((sel: string) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const doc: any = (globalThis as any).document;
+      return !!doc.querySelector(sel);
+    }, stopBtnSel);
+    if (!streamingStarted) {
+      logger.info('gemini_chat: Enter did not submit, clicking send button');
+      const clicked = await page.evaluate((sel: string) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const doc: any = (globalThis as any).document;
+        const candidates = Array.from(doc.querySelectorAll(sel)) as HTMLElement[];
+        // Pick the first enabled button.
+        for (const b of candidates) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          if (!(b as any).disabled && b.offsetParent !== null) {
+            b.click();
+            return true;
+          }
+        }
+        return false;
+      }, sendBtnSel);
+      logger.info({ clicked }, 'gemini_chat: send button click result');
+    }
 
     // ─── Wait for response — fast path ───
     // Primary signal: the "Stop generating" button is present while
@@ -623,8 +656,6 @@ export async function runGeminiChatNode(input: GeminiChatInput): Promise<GeminiC
     // Fallback: poll text stability with shorter window.
     const respSel =
       'message-content, [data-test-id="response-message"], .response-container .markdown, model-response .markdown, .conversation-turn:last-of-type .response-content';
-    const stopBtnSel =
-      'button[aria-label*="stop" i], button[aria-label*="dừng" i], button[data-test-id="stop-button"]';
 
     const start = Date.now();
     let lastText = '';

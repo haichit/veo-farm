@@ -661,8 +661,10 @@ function resolvePromptList(
   incoming: Array<{ source: string; targetHandle?: string }>,
   outputs: Map<string, unknown>,
 ): string[] | null {
+  // Accept textList from any incoming edge — a textList output can only mean
+  // "fan-out the downstream node N times". Targeting it to ref-image ports
+  // would be a UI mistake we just transparently fix here.
   for (const e of incoming) {
-    if (e.targetHandle && e.targetHandle !== 'input-0') continue;
     const up = outputs.get(e.source);
     if (!up || typeof up !== 'object') continue;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -10,7 +10,7 @@
     "captcha:dev": "tsx src/captcha-server/server.ts",
     "captcha:dev:watch": "tsx watch src/captcha-server/server.ts",
     "captcha:start": "node dist/captcha-server/server.js",
-    "build": "tsc",
+    "build": "tsc && node ./scripts/copy-static-assets.cjs",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "lint": "echo 'no lint configured'",

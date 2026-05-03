@@ -1,14 +1,15 @@
 {
   "name": "@veo-farm/desktop",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "Veo Farm — Electron desktop shell",
   "main": "dist/main.js",
   "scripts": {
     "build:tsc": "tsc -p tsconfig.json",
-    "build:web": "pnpm --filter @veo-farm/web build",
+    "build:shared": "pnpm --filter @veo-farm/shared build",
+    "build:web": "pnpm --filter @veo-farm/web build && node scripts/copy-web-static.cjs",
     "build:worker": "pnpm --filter @veo-farm/worker build",
-    "build": "pnpm build:tsc && pnpm build:web && pnpm build:worker",
+    "build": "pnpm build:tsc && pnpm build:shared && pnpm build:web && pnpm build:worker",
     "start": "electron .",
     "dist": "pnpm build && electron-builder --win --x64",
     "dist:dir": "pnpm build && electron-builder --win --x64 --dir"
@@ -16,7 +17,8 @@
   "dependencies": {
     "electron-log": "^5.1.0",
     "electron-updater": "^6.2.0",
-    "7zip-bin": "^5.2.0"
+    "7zip-bin": "^5.2.0",
+    "@veo-farm/shared": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
