@@ -22,7 +22,22 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
+
+      # electron-builder needs 7zip-bin/win/x64/7za.exe at pack time. pnpm
+      # sometimes skips the optional binary even on Windows runners, so verify
+      # + reinstall it explicitly.
+      - name: Ensure 7zip-bin Windows binary
+        shell: pwsh
+        run: |
+          $expected = "node_modules/7zip-bin/win/x64/7za.exe"
+          if (-not (Test-Path $expected)) {
+            Write-Host "7za.exe missing — forcing reinstall of 7zip-bin"
+            pnpm add -w 7zip-bin --no-save
+          }
+          if (-not (Test-Path $expected)) {
+            throw "7zip-bin still missing at $expected"
+          }
 
       - name: Download ffmpeg static (Windows x64)
         shell: pwsh
