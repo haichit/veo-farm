@@ -11,19 +11,28 @@ log.info('Veo Farm starting…');
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function findOpenPort(start = 41000): Promise<number> {
-  return new Promise((resolve, reject) => {
+function tryPort(port: number): Promise<number | null> {
+  return new Promise((resolve) => {
     const srv = net.createServer();
     srv.unref();
-    srv.on('error', reject);
-    srv.listen(start, () => {
-      const addr = srv.address();
-      srv.close(() => {
-        if (addr && typeof addr === 'object') resolve(addr.port);
-        else reject(new Error('Cannot determine port'));
-      });
+    srv.once('error', () => resolve(null));
+    srv.listen(port, '127.0.0.1', () => {
+      srv.close(() => resolve(port));
     });
   });
+}
+
+// Fixed port so the Supabase auth cookie (bound to 127.0.0.1:PORT) survives
+// across app restarts. Falls back to ephemeral if the preferred port is busy
+// — in that rare case the user has to log in once more.
+async function findOpenPort(): Promise<number> {
+  const PREFERRED = 41234;
+  const taken = await tryPort(PREFERRED);
+  if (taken) return taken;
+  log.warn(`port ${PREFERRED} busy, falling back to ephemeral (will require re-login)`);
+  const ephemeral = await tryPort(0);
+  if (!ephemeral) throw new Error('No free port found');
+  return ephemeral;
 }
 
 function resolveResource(rel: string): string {
@@ -94,7 +103,7 @@ const SUPABASE_ENV = {
 };
 
 async function startEmbeddedServer(): Promise<string> {
-  const port = await findOpenPort(41000);
+  const port = await findOpenPort();
   const webRoot = resolveResource('web');
   const serverJs = path.join(webRoot, 'apps', 'web', 'server.js');
   if (!fs.existsSync(serverJs)) {
