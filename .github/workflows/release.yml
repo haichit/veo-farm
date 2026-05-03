@@ -58,7 +58,18 @@ jobs:
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
         run: pnpm --filter @veo-farm/desktop build
 
+      # electron-builder + pnpm hoist sometimes leaves binary deps unreachable
+      # via spawn(). Re-install electron-builder's own deps inside the desktop
+      # workspace using npm — that gives the packer its own flat node_modules
+      # with executable permissions intact.
+      - name: Install electron-builder app deps
+        shell: pwsh
+        working-directory: apps/desktop
+        run: |
+          npm install --no-package-lock --no-save electron-builder@24.13.3 7zip-bin@^5.2.0 app-builder-bin@^4.0.0
+
       - name: Package & publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: pnpm --filter @veo-farm/desktop dist
+        working-directory: apps/desktop
+        run: npx electron-builder --win --x64 --publish always
