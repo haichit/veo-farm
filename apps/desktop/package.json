@@ -80,7 +80,8 @@
       {
         "provider": "github",
         "owner": "haichit",
-        "repo": "veo-farm"
+        "repo": "veo-farm",
+        "releaseType": "release"
       }
     ]
   }
