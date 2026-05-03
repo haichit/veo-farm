@@ -53,6 +53,13 @@ export class TokenManager {
   async launch(opts: LaunchOptions = {}): Promise<void> {
     const extPath = path.resolve(__dirname, '../captcha-server/extension');
 
+    // Hide the Brave window off-screen so the user isn't bothered by it
+    // popping up, while still rendering everything for real (recaptcha v3
+    // score depends on a "real" looking window — pure --headless tanks it).
+    // BROWSER_VISIBLE=true (set via env) opts back into a visible window for
+    // debugging.
+    const hideOffscreen = process.env.BROWSER_VISIBLE !== 'true';
+
     const args = [
       '--no-sandbox',
       '--disable-blink-features=AutomationControlled',
@@ -68,6 +75,14 @@ export class TokenManager {
       '--allow-insecure-localhost',
       '--allow-running-insecure-content',
       '--unsafely-treat-insecure-origin-as-secure=https://127.0.0.1:3456,https://localhost:3456',
+      ...(hideOffscreen
+        ? [
+            // Place the window far off-screen and shrink to minimum so user
+            // never sees it. Brave still composites pixels (good for score).
+            '--window-position=-3000,-3000',
+            '--window-size=1280,800',
+          ]
+        : []),
     ];
 
     const launchOpts: any = {
