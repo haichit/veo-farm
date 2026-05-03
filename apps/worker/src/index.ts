@@ -17,9 +17,19 @@ async function sleep(ms: number) {
 }
 
 async function pollOnce() {
-  const { data, error } = await supabase().rpc('claim_next_job');
+  // Local Electron deployment: WORKER_USER_ID is set after the user logs in
+  // (Electron main re-spawns the worker with the env var). Without it, the
+  // worker stays idle — it MUST NOT pick up another user's jobs because
+  // their cookies would then be decrypted on the wrong machine.
+  const userId = process.env.WORKER_USER_ID;
+  if (!userId) {
+    return null;
+  }
+  const { data, error } = await supabase().rpc('claim_next_job_for_user', {
+    p_user_id: userId,
+  });
   if (error) {
-    logger.error({ err: error }, 'claim_next_job failed');
+    logger.error({ err: error }, 'claim_next_job_for_user failed');
     return null;
   }
   return data;
