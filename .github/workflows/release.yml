@@ -24,20 +24,22 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      # electron-builder needs 7zip-bin/win/x64/7za.exe at pack time. pnpm
-      # sometimes skips the optional binary even on Windows runners, so verify
-      # + reinstall it explicitly.
-      - name: Ensure 7zip-bin Windows binary
+      # electron-builder needs Windows binaries (7zip-bin, app-builder-bin,
+      # winCodeSign). Verify the 2 most-frequently-skipped ones — if pnpm
+      # missed them despite supportedArchitectures, fail fast with a clear msg.
+      - name: Verify electron-builder Windows binaries
         shell: pwsh
         run: |
-          $expected = "node_modules/7zip-bin/win/x64/7za.exe"
-          if (-not (Test-Path $expected)) {
-            Write-Host "7za.exe missing — forcing reinstall of 7zip-bin"
-            pnpm add -w 7zip-bin --no-save
+          $needed = @(
+            "node_modules/7zip-bin/win/x64/7za.exe",
+            "node_modules/app-builder-bin/win/x64/app-builder.exe"
+          )
+          foreach ($p in $needed) {
+            if (-not (Test-Path $p)) {
+              throw "Missing: $p — pnpm did not install Windows binary."
+            }
           }
-          if (-not (Test-Path $expected)) {
-            throw "7zip-bin still missing at $expected"
-          }
+          Write-Host "All required Windows binaries present."
 
       - name: Download ffmpeg static (Windows x64)
         shell: pwsh
