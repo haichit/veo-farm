@@ -175,12 +175,26 @@ function spawnWorker(userId: string | null) {
   const bravePath = detectBraveExe();
   const synthNodeModules = buildSharedPackageStub();
 
-  log.info('spawning worker', { userId: userId ?? '(none)' });
+  // node_modules path resolution:
+  // - Packaged: deps are unpacked from app.asar to app.asar.unpacked/node_modules
+  //   (asarUnpack: ["node_modules/**/*"] in electron-builder config). Worker
+  //   subprocess is plain Node — can't read asar — so we point NODE_PATH at
+  //   the unpacked filesystem path.
+  // - Dev: deps are at the monorepo root node_modules.
+  const packedNodeModules = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules')
+    : path.join(__dirname, '..', '..', '..', 'node_modules');
+  // Multi-path NODE_PATH (delimiter: ; on Win, : elsewhere) — synth folder
+  // hosts @veo-farm/shared, packed folder hosts pino/supabase/etc.
+  const sep = process.platform === 'win32' ? ';' : ':';
+  const nodePath = [synthNodeModules, packedNodeModules].join(sep);
+
+  log.info('spawning worker', { userId: userId ?? '(none)', nodePath });
   const child = spawn(process.execPath, [workerEntry], {
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
-      NODE_PATH: synthNodeModules,
+      NODE_PATH: nodePath,
       ...RUNTIME_ENV,
       ...(bravePath ? { BRAVE_PATH: bravePath } : {}),
       FFMPEG_PATH: path.join(
