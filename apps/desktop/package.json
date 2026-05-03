@@ -1,6 +1,6 @@
 {
   "name": "@veo-farm/desktop",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "description": "Veo Farm — Electron desktop shell",
   "main": "dist/main.js",
@@ -58,6 +58,10 @@
         "from": "../worker/dist",
         "to": "worker",
         "filter": ["**/*"]
+      },
+      {
+        "from": "../worker/package.json",
+        "to": "worker/package.json"
       },
       {
         "from": "../../packages/shared/dist",
