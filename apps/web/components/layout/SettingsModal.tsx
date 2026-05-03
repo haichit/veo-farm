@@ -2,6 +2,7 @@
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Settings as SettingsIcon, Server, Cookie, Database, Workflow } from 'lucide-react';
+import { useAppVersion } from '@/lib/use-app-version';
 
 interface SettingsModalProps {
   open: boolean;
@@ -10,6 +11,7 @@ interface SettingsModalProps {
 }
 
 export function SettingsModal({ open, onClose, email }: SettingsModalProps) {
+  const version = useAppVersion();
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-xl">
@@ -18,7 +20,7 @@ export function SettingsModal({ open, onClose, email }: SettingsModalProps) {
             <SettingsIcon className="w-5 h-5 text-accent" />
             Cài đặt
           </DialogTitle>
-          <DialogDescription>Thông tin runtime · phiên bản 0.1.0</DialogDescription>
+          <DialogDescription>Thông tin runtime · phiên bản {version}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">

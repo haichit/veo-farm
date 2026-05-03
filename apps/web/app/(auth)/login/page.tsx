@@ -11,6 +11,7 @@ import { GradientText } from '@/components/ui/GradientText';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+import { useAppVersion } from '@/lib/use-app-version';
 
 type AlertState = { type: 'info' | 'success' | 'error'; msg: string } | null;
 
@@ -175,8 +176,15 @@ export default function LoginPage() {
           </p>
         </GlassCard>
 
-        <div className="text-center mt-6 text-xs text-text-muted">Phiên bản 0.1.0 · Veo Farm</div>
+        <VersionFooter />
       </div>
     </div>
+  );
+}
+
+function VersionFooter() {
+  const v = useAppVersion();
+  return (
+    <div className="text-center mt-6 text-xs text-text-muted">Phiên bản {v} · Veo Farm</div>
   );
 }

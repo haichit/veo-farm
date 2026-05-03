@@ -482,6 +482,8 @@ ipcMain.handle('vf:set-user', (_evt, userId: string | null) => {
   return { ok: true, changed: true };
 });
 
+ipcMain.handle('vf:get-version', () => app.getVersion());
+
 app.whenReady().then(() => {
   createWindow();
   setupAutoUpdate();
