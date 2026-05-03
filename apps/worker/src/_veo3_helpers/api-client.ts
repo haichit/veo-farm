@@ -693,21 +693,40 @@ export class ApiClient extends EventEmitter {
           bodyStr.includes('PUBLIC_ERROR_UNUSUAL_ACTIVITY') ||
           bodyStr.includes('reCAPTCHA evaluation failed') ||
           (bodyStr.includes('reCAPTCHA') && bodyStr.includes('PERMISSION_DENIED'));
-        if (status === 403 && isRecaptchaReject && attempt < RETRY_MAX) {
+        // Anti-bot recaptcha rejects: get a more generous retry budget than
+        // the default RETRY_MAX (3). Each rotate does a full page navigate +
+        // ~10s settle, so cap at 5 attempts and back off harder (15s, 30s,
+        // 60s, 120s) — gives Google's bot fingerprint time to cool off.
+        const RECAPTCHA_RETRY_MAX = 5;
+        if (status === 403 && isRecaptchaReject && attempt < RECAPTCHA_RETRY_MAX) {
           await this.tokenManager._rotateRecaptchaSession?.('UNUSUAL_ACTIVITY');
           if (body?.clientContext?.recaptchaContext) {
             body.clientContext.recaptchaContext.token = await this.tokenManager.getRecaptchaToken(
               recaptchaAction,
             );
           }
-          // Brief pause to let the freshly-minted session settle on Google's
-          // side before retrying.
-          await sleep(2000 * attempt);
+          // Exponential backoff — give Google's anti-bot a longer cooldown
+          // each round so the session looks less automated.
+          await sleep(Math.min(15_000 * Math.pow(2, attempt - 1), 120_000));
           continue;
         }
         if (status === 429 && attempt < RETRY_MAX) {
           await sleep(Math.min(60_000 * attempt, 300_000));
           continue;
+        }
+        // 401 UNAUTHENTICATED: cached Bearer expired/revoked. Drop it and
+        // force a navigate-and-intercept cycle, then retry. Cookies still
+        // valid → token refreshes silently. Cookies expired → next getToken
+        // throws and we surface the real auth failure on the final attempt.
+        if (status === 401 && attempt < RETRY_MAX) {
+          this.tokenManager.invalidateBearer();
+          try {
+            await this.tokenManager.getToken();
+            await sleep(1000 * attempt);
+            continue;
+          } catch {
+            /* fall through to throw below */
+          }
         }
         if (status === 401 || status === 403) {
           throw new Error(`AUTH_ERROR_${status}: ${bodyStr.substring(0, 500)}`);

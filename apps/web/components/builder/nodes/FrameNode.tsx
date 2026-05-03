@@ -1,5 +1,6 @@
 'use client';
 
+import { useRef } from 'react';
 import { NodeResizer, type NodeProps } from '@xyflow/react';
 import { Frame as FrameIcon, Play } from 'lucide-react';
 import { useFlowStore, type BuilderNodeData } from '@/lib/builder/flow-store';
@@ -19,7 +20,11 @@ export function FrameNode(props: NodeProps) {
   const w = (props.width as number | undefined) ?? cfg?.width ?? 500;
   const h = (props.height as number | undefined) ?? cfg?.height ?? 400;
   const updateConfig = useFlowStore((s) => s.updateNodeConfig);
+  const scaleNodesInFrame = useFlowStore((s) => s.scaleNodesInFrame);
   const { startRun } = useWorkflowRun();
+  // Track frame box at the moment NodeResizer started so we scale children
+  // relative to the OLD bounding box (not the live one which mutates per frame).
+  const resizeStart = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
 
   // Run frame: find every other node whose centre lies inside this frame's
   // bounding box, then run the union of their ancestors.
@@ -69,7 +74,19 @@ export function FrameNode(props: NodeProps) {
             border: '1px solid #1a1a2e',
           }}
           lineStyle={{ borderColor: 'rgba(245, 158, 11, 0.7)', borderWidth: 1 }}
+          onResizeStart={() => {
+            const fx = positionAbsoluteX ?? (props as unknown as { xPos?: number }).xPos ?? 0;
+            const fy = positionAbsoluteY ?? (props as unknown as { yPos?: number }).yPos ?? 0;
+            resizeStart.current = { x: fx, y: fy, w, h };
+          }}
           onResizeEnd={(_e, params) => {
+            const start = resizeStart.current;
+            resizeStart.current = null;
+            if (start && start.w > 0 && start.h > 0) {
+              const sx = params.width / start.w;
+              const sy = params.height / start.h;
+              scaleNodesInFrame(start, start.x, start.y, sx, sy);
+            }
             // Persist the new size into config so the next mount renders at
             // the same size before NodeResizer re-syncs.
             updateConfig(id, { width: params.width, height: params.height });

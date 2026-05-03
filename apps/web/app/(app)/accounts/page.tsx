@@ -31,20 +31,29 @@ export default function AccountsPage() {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  async function load() {
-    setLoading(true);
+  async function load(showLoader = false) {
+    if (showLoader) setLoading(true);
     const r = await fetch('/api/accounts');
     setItems(await r.json());
     setLoading(false);
   }
   useEffect(() => {
-    load();
+    load(true);
   }, []);
 
   async function del(id: string) {
     if (!confirm('Xoá account này?')) return;
-    await fetch(`/api/accounts/${id}`, { method: 'DELETE' });
-    load();
+    // Optimistic: drop from list immediately so UI feels instant.
+    const snapshot = items;
+    setItems((prev) => prev.filter((a) => a.id !== id));
+    try {
+      const r = await fetch(`/api/accounts/${id}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error(await r.text());
+    } catch (e) {
+      // Rollback on failure.
+      setItems(snapshot);
+      alert(`Xoá thất bại: ${(e as Error).message}`);
+    }
   }
 
   const grouped = items.reduce<Record<string, Account[]>>((acc, a) => {
@@ -179,9 +188,15 @@ export default function AccountsPage() {
       <AddAccountModal
         open={open}
         onClose={() => setOpen(false)}
-        onCreated={() => {
+        onCreated={(acc) => {
           setOpen(false);
-          load();
+          // Optimistic insert — push the new row at top so it appears instantly,
+          // no need to refetch the whole list.
+          if (acc?.id) {
+            setItems((prev) => [{ ...acc, usage_today: 0 }, ...prev]);
+          } else {
+            load();
+          }
         }}
       />
     </div>

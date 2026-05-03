@@ -1,0 +1,49 @@
+name: Build & Release Veo Farm
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download ffmpeg static (Windows x64)
+        shell: pwsh
+        run: |
+          $ffmpegDir = "apps/desktop/vendor/ffmpeg"
+          New-Item -ItemType Directory -Force -Path $ffmpegDir | Out-Null
+          $url = "https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip"
+          Invoke-WebRequest -Uri $url -OutFile "$ffmpegDir/ffmpeg.zip"
+          Expand-Archive -Path "$ffmpegDir/ffmpeg.zip" -DestinationPath "$ffmpegDir/_unpack"
+          Copy-Item "$ffmpegDir/_unpack/*/bin/ffmpeg.exe" -Destination "$ffmpegDir/ffmpeg.exe"
+          Remove-Item -Recurse -Force "$ffmpegDir/_unpack","$ffmpegDir/ffmpeg.zip"
+
+      - name: Build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+        run: pnpm --filter @veo-farm/desktop build
+
+      - name: Package & publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm --filter @veo-farm/desktop dist

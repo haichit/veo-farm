@@ -4,12 +4,13 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  Layers3,
   Key,
+  Layers3,
   ListChecks,
   LayoutDashboard,
   LogOut,
   Settings,
+  Shield,
   Workflow,
 } from 'lucide-react';
 import { SettingsModal } from './SettingsModal';
@@ -21,13 +22,24 @@ interface TopNavProps {
 export function TopNav({ email }: TopNavProps) {
   const path = usePathname();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/me')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setIsAdmin(d?.role === 'admin'))
+      .catch(() => {});
+  }, []);
 
   const tabs = [
     { href: '/', label: 'Dashboard', icon: LayoutDashboard, exact: true },
-    { href: '/flows', label: 'Flows', icon: Layers3 },
+    { href: '/workflows', label: 'Workflows', icon: Layers3 },
     { href: '/canvas', label: 'Canvas', icon: Workflow },
     { href: '/accounts', label: 'Accounts', icon: Key },
     { href: '/runs', label: 'Runs', icon: ListChecks },
+    ...(isAdmin
+      ? [{ href: '/admin/users', label: 'Admin', icon: Shield } as const]
+      : []),
   ];
 
   return (

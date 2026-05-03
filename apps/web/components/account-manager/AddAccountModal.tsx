@@ -22,7 +22,7 @@ export function AddAccountModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onCreated: () => void;
+  onCreated: (acc?: any) => void;
 }) {
   const [provider, setProvider] = useState('chatgpt');
   const [label, setLabel] = useState('');
@@ -47,7 +47,7 @@ export function AddAccountModal({
       }
       setLabel('');
       setCookiesJson('');
-      onCreated();
+      onCreated(data);
     } catch (e: any) {
       setError(`JSON không hợp lệ: ${e.message}`);
     } finally {

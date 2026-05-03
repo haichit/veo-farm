@@ -15,9 +15,15 @@ export function PreviewMedia({ media }: PreviewMediaProps) {
 
   if (!media || media.length === 0) return null;
 
+  const n = media.length;
+  const cols = n === 1 ? 1 : n === 2 ? 2 : n === 3 ? 3 : n === 4 ? 2 : n <= 9 ? 3 : 4;
+
   return (
     <>
-      <div className="mt-2 grid gap-1.5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))' }}>
+      <div
+        className="mt-2 grid gap-1.5 w-full min-w-0"
+        style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+      >
         {media.map((m, i) => (
           <Thumb key={`${m.url}-${i}`} media={m} index={i} total={media.length} onOpen={() => setLightboxIdx(i)} />
         ))}
@@ -42,7 +48,7 @@ function Thumb({
 }) {
   return (
     <div
-      className="nodrag relative h-[70px] rounded-md overflow-hidden bg-white/[0.04] border border-white/[0.08] cursor-pointer group"
+      className="nodrag relative aspect-video w-full rounded-md overflow-hidden bg-white/[0.04] border border-white/[0.08] cursor-pointer group"
       onDoubleClick={onOpen}
       onMouseDown={(e) => e.stopPropagation()}
       title="Nhấp đúp để xem"

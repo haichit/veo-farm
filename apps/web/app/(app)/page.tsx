@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Layers3, Key, ListChecks, ArrowRight } from 'lucide-react';
+import { Workflow, Key, ListChecks, ArrowRight } from 'lucide-react';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { GradientText } from '@/components/ui/GradientText';
 
@@ -15,10 +15,10 @@ export default function DashboardPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Tile
-          href="/flows"
-          icon={Layers3}
-          title="Flows"
-          desc="Tạo & sửa workflow video"
+          href="/workflows"
+          icon={Workflow}
+          title="Workflows"
+          desc="Danh sách workflow đã lưu"
         />
         <Tile
           href="/accounts"

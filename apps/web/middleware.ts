@@ -1,7 +1,16 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
-const PUBLIC_PATHS = ['/login', '/auth/callback', '/api/health'];
+const PUBLIC_PATHS = [
+  '/login',
+  '/signup',
+  '/forgot-password',
+  '/reset-password',
+  '/auth/callback',
+  '/api/health',
+];
+
+const AUTH_PAGES = new Set(['/login', '/signup', '/forgot-password']);
 
 export async function middleware(req: NextRequest) {
   const res = NextResponse.next({ request: req });
@@ -22,7 +31,9 @@ export async function middleware(req: NextRequest) {
     },
   );
 
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   const pathname = req.nextUrl.pathname;
   const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'));
 
@@ -31,10 +42,24 @@ export async function middleware(req: NextRequest) {
     url.pathname = '/login';
     return NextResponse.redirect(url);
   }
-  if (user && pathname === '/login') {
+  if (user && AUTH_PAGES.has(pathname)) {
     const url = req.nextUrl.clone();
     url.pathname = '/';
     return NextResponse.redirect(url);
+  }
+
+  // Suspended-account guard.
+  if (user && !isPublic && pathname !== '/suspended') {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('status')
+      .eq('id', user.id)
+      .maybeSingle();
+    if (profile?.status === 'suspended') {
+      const url = req.nextUrl.clone();
+      url.pathname = '/suspended';
+      return NextResponse.redirect(url);
+    }
   }
 
   return res;

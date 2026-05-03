@@ -130,6 +130,18 @@ interface FlowStoreState {
    * positions RELATIVE to parent so naive reassignment makes the child jump.
    */
   setNodeParent: (nodeId: string, newParentId: string | null) => void;
+  /**
+   * Scale every non-frame node whose centre lies inside `frameBox` (the OLD
+   * bounding box of the frame, pre-resize) by (sx, sy) relative to (fx, fy).
+   * Used by FrameNode onResize so children grow/shrink together with the frame.
+   */
+  scaleNodesInFrame: (
+    frameBox: { x: number; y: number; w: number; h: number },
+    fx: number,
+    fy: number,
+    sx: number,
+    sy: number,
+  ) => void;
   /** Reset only the listed nodes (status / preview / output). */
   resetNodesStatus: (ids: string[]) => void;
 
@@ -287,9 +299,9 @@ export const useFlowStore = create<FlowStoreState>()(
       position,
       data: { config, status: 'idle' },
       width: def.width,
-      height: def.minHeight,
-      // Frames render behind other nodes so children appear grouped within them.
-      ...(type === 'frame' ? { zIndex: -1 } : {}),
+      // Only frames need a fixed initial height (group container UX).
+      // Other nodes auto-grow to fit content (chips + preview thumbs).
+      ...(type === 'frame' ? { height: def.minHeight, zIndex: -1 } : {}),
     };
     set((s) => ({
       // Prepend frames so React Flow paints them first (lower z layer).
@@ -354,6 +366,39 @@ export const useFlowStore = create<FlowStoreState>()(
               }
             : n,
         ),
+      };
+    }),
+  scaleNodesInFrame: (frameBox, fx, fy, sx, sy) =>
+    set((s) => {
+      if (sx === 1 && sy === 1) return {};
+      const inside = (n: BuilderNode) => {
+        if (n.type === 'frame') return false;
+        const nx = n.position?.x ?? 0;
+        const ny = n.position?.y ?? 0;
+        const nw = n.width ?? 240;
+        const nh = n.height ?? 100;
+        const cx = nx + nw / 2;
+        const cy = ny + nh / 2;
+        return (
+          cx >= frameBox.x &&
+          cx <= frameBox.x + frameBox.w &&
+          cy >= frameBox.y &&
+          cy <= frameBox.y + frameBox.h
+        );
+      };
+      return {
+        nodes: s.nodes.map((n) => {
+          if (!inside(n)) return n;
+          const newX = fx + (n.position.x - fx) * sx;
+          const newY = fy + (n.position.y - fy) * sy;
+          const next: BuilderNode = {
+            ...n,
+            position: { x: newX, y: newY },
+            width: n.width ? Math.round(n.width * sx) : n.width,
+            ...(n.height ? { height: Math.round(n.height * sy) } : {}),
+          };
+          return next;
+        }),
       };
     }),
   resetNodesStatus: (ids) => {
@@ -563,12 +608,24 @@ export const useFlowStore = create<FlowStoreState>()(
       })),
     };
     const url = currentWorkflowId ? `/api/workflows/${currentWorkflowId}` : '/api/workflows';
-    const r = await fetch(url, {
-      method: currentWorkflowId ? 'PATCH' : 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: payload.name, graph: payload }),
-    });
-    if (!r.ok) return;
+    let r: Response;
+    try {
+      r = await fetch(url, {
+        method: currentWorkflowId ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: payload.name, graph: payload }),
+      });
+    } catch (e) {
+      console.error('[saveWorkflow] network error', e);
+      alert(`Lưu thất bại (network): ${(e as Error).message ?? e}`);
+      return;
+    }
+    if (!r.ok) {
+      const body = await r.text().catch(() => '');
+      console.error('[saveWorkflow] failed', r.status, body);
+      alert(`Lưu thất bại (${r.status}): ${body || r.statusText}`);
+      return;
+    }
     const data = await r.json();
     set({ currentWorkflowId: data.id, currentWorkflowName: data.name ?? payload.name });
     await get().refreshSavedWorkflows();
@@ -585,7 +642,8 @@ export const useFlowStore = create<FlowStoreState>()(
       position: n.position,
       data: { config: n.data?.config ?? {}, label: n.data?.label, status: 'idle' },
       width: n.width,
-      height: n.height,
+      // Only keep stored height for frames — other nodes auto-grow with content.
+      ...(n.type === 'frame' && n.height ? { height: n.height } : {}),
       ...(n.parentId ? { parentId: n.parentId } : {}),
     }));
     const restoredEdges: Edge[] = graph.edges.map((e) => ({

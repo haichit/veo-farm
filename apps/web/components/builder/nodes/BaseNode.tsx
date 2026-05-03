@@ -97,12 +97,11 @@ export function BaseNode(props: BaseNodeProps) {
 
   return (
     <div
-      className={`relative bg-[#1a1a2e] rounded-[10px] transition-all ${borderClass}`}
+      className={`relative bg-[#1a1a2e] rounded-[10px] transition-all flex flex-col ${borderClass}`}
       style={{
         width: '100%',
-        height: '100%',
+        minHeight: '100%',
         minWidth: def.width,
-        minHeight: def.minHeight,
         ...shadowStyle,
         ...(selected ? { borderColor: def.color } : {}),
       }}
@@ -176,7 +175,7 @@ export function BaseNode(props: BaseNodeProps) {
 
       {/* Header (36px) */}
       <div
-        className="flex items-center gap-2 h-9 px-3 rounded-t-[10px]"
+        className="flex items-center gap-2 h-9 px-3 rounded-t-[10px] shrink-0"
         style={{
           background: `${def.color}30`,
           borderBottom: `1px solid ${def.color}40`,
@@ -263,10 +262,7 @@ export function BaseNode(props: BaseNodeProps) {
 
       {/* Body — flex-col + min-h-0 + h-full so children with `flex-1` grow
           when the user resizes the node via NodeResizer. */}
-      <div
-        className="px-3 py-2.5 flex flex-col gap-2 min-h-0"
-        style={{ height: 'calc(100% - 36px)' }}
-      >
+      <div className="px-3 py-2.5 flex flex-col gap-2 min-w-0 w-full flex-1 min-h-0 overflow-x-hidden">
         {children}
         {(data as BuilderNodeData)?.previewMedia && (data as BuilderNodeData).previewMedia!.length > 0 && (
           <PreviewMedia media={(data as BuilderNodeData).previewMedia!} />

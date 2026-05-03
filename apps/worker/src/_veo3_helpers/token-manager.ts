@@ -178,6 +178,15 @@ export class TokenManager {
   }
 
   /**
+   * Drop the cached Bearer so the next getToken() goes through the full
+   * navigate + intercept pipeline. Call when the API returns 401
+   * UNAUTHENTICATED — the cached token has expired or been revoked.
+   */
+  invalidateBearer(): void {
+    this._bearerToken = null;
+  }
+
+  /**
    * Returns a fresh Bearer token. If none captured yet, trigger a UI interaction
    * that causes the SPA to make an authenticated XHR.
    */
@@ -308,8 +317,24 @@ export class TokenManager {
   async _rotateRecaptchaSession(reason: string): Promise<void> {
     console.warn(`[TokenManager] Rotating session: ${reason}`);
     await this._captchaBridge.forceRefresh();
-    // Wait for extension client to reconnect after page reload.
-    await sleep(8000);
+    // Hard reset: full navigate to /fx/vi/tools/flow so the SPA bootstraps a
+    // fresh recaptcha context + grecaptcha widget. Plain forceRefresh()
+    // sometimes leaves the page on a stale state Google has already
+    // fingerprinted as a bot.
+    if (this._page) {
+      try {
+        await this._page.goto(LABS_BASE + '/fx/vi/tools/flow', {
+          waitUntil: 'domcontentloaded',
+          timeout: 60_000,
+        });
+        // Let recaptcha widget settle + extension client reconnect.
+        await sleep(10_000);
+      } catch (e) {
+        console.warn('[TokenManager] rotate navigate failed:', (e as Error).message);
+      }
+    } else {
+      await sleep(8000);
+    }
     this._bearerToken = null;
   }
 
