@@ -34,7 +34,7 @@ importers:
         specifier: ^20.10.0
         version: 20.19.39
       electron:
-        specifier: ^31.0.0
+        specifier: 31.7.7
         version: 31.7.7
       electron-builder:
         specifier: ^24.13.0
