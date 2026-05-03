@@ -33,23 +33,47 @@ export function AddAccountModal({
   async function submit() {
     setSubmitting(true);
     setError('');
+    // Step 1: parse the cookie textarea — pure client-side, no network.
+    let cookies: unknown;
     try {
-      const cookies = JSON.parse(cookiesJson);
+      cookies = JSON.parse(cookiesJson);
+    } catch (e: any) {
+      setError(`Cookies JSON không hợp lệ: ${e.message}`);
+      setSubmitting(false);
+      return;
+    }
+    // Step 2: hit the server. Read body as text first so we can surface the
+    // raw payload when it isn't JSON (HTML 500 page, empty 502, redirect, …).
+    try {
       const res = await fetch('/api/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider_id: provider, label: label || `${provider}-${Date.now()}`, cookies }),
+        body: JSON.stringify({
+          provider_id: provider,
+          label: label || `${provider}-${Date.now()}`,
+          cookies,
+        }),
       });
-      const data = await res.json();
+      const raw = await res.text();
+      let data: any = null;
+      if (raw) {
+        try {
+          data = JSON.parse(raw);
+        } catch {
+          /* not JSON — fall through with raw */
+        }
+      }
       if (!res.ok) {
-        setError(data.error ?? 'Lỗi tạo account');
+        const msg =
+          data?.error ?? raw?.slice(0, 200) ?? `HTTP ${res.status} ${res.statusText}`;
+        setError(`Lỗi server (${res.status}): ${msg}`);
         return;
       }
       setLabel('');
       setCookiesJson('');
       onCreated(data);
     } catch (e: any) {
-      setError(`JSON không hợp lệ: ${e.message}`);
+      setError(`Lỗi mạng: ${e.message}`);
     } finally {
       setSubmitting(false);
     }

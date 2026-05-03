@@ -83,6 +83,16 @@ function killChildren() {
 
 let mainWindow: BrowserWindow | null = null;
 
+// Supabase config — anon key is designed to be exposed (RLS enforces auth);
+// hard-coded so packaged exe doesn't need .env on the user's machine. Service
+// role key is NOT bundled — only worker needs it and worker reads from Supabase
+// via anon-key after the user logs in.
+const SUPABASE_ENV = {
+  NEXT_PUBLIC_SUPABASE_URL: 'https://ogcsrvdfxtxcpaogplph.supabase.co',
+  NEXT_PUBLIC_SUPABASE_ANON_KEY:
+    'sb_publishable_whdqQ22dJXtZfIs1nxcliw_vq3qQ7sw',
+};
+
 async function startEmbeddedServer(): Promise<string> {
   const port = await findOpenPort(41000);
   const webRoot = resolveResource('web');
@@ -95,6 +105,7 @@ async function startEmbeddedServer(): Promise<string> {
     HOSTNAME: '127.0.0.1',
     NODE_ENV: 'production',
     ELECTRON_RUN_AS_NODE: '1',
+    ...SUPABASE_ENV,
   });
 
   // Worker — long-lived background process.
@@ -103,6 +114,7 @@ async function startEmbeddedServer(): Promise<string> {
     const bravePath = detectBraveExe();
     spawnChild('worker', process.execPath, [workerEntry], {
       ELECTRON_RUN_AS_NODE: '1',
+      ...SUPABASE_ENV,
       ...(bravePath ? { BRAVE_BROWSER_PATH: bravePath } : {}),
       FFMPEG_PATH: path.join(
         resolveResource('ffmpeg'),
