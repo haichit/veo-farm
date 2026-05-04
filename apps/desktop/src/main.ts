@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import log from 'electron-log';
 import { autoUpdater } from 'electron-updater';
+import treeKill from 'tree-kill';
 
 log.transports.file.level = 'info';
 log.info('Veo Farm starting…');
@@ -93,14 +94,29 @@ function spawnChild(name: string, cmd: string, args: string[], env: NodeJS.Proce
   return child;
 }
 
-function killChildren() {
-  for (const c of children) {
-    try {
-      c.kill();
-    } catch {
-      // ignore
+function killChildren(): Promise<void> {
+  // tree-kill recurses into descendants — required on Windows because
+  // child.kill() only signals the immediate child. Brave/puppeteer spawn
+  // their own grandchildren that otherwise survive app.quit() and lock the
+  // .exe file, breaking the auto-updater.
+  return new Promise((resolve) => {
+    if (children.length === 0) return resolve();
+    let pending = children.length;
+    const done = () => {
+      pending -= 1;
+      if (pending === 0) resolve();
+    };
+    for (const c of children) {
+      if (!c.pid || c.exitCode !== null) {
+        done();
+        continue;
+      }
+      treeKill(c.pid, 'SIGKILL', (err) => {
+        if (err) log.warn(`tree-kill pid=${c.pid} failed: ${err.message}`);
+        done();
+      });
     }
-  }
+  });
 }
 
 // ─── Boot ───────────────────────────────────────────────────────────────────
@@ -394,6 +410,30 @@ function downloadFile(url: string, dest: string): Promise<void> {
 
 // ─── Auto-update ────────────────────────────────────────────────────────────
 
+// State machine the renderer reads via IPC. Drives the in-app UpdateBadge
+// (top-right, next to the worker connection chip).
+type UpdateState =
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | { state: 'available'; version: string }
+  | { state: 'downloading'; version: string; percent: number }
+  | { state: 'downloaded'; version: string }
+  | { state: 'error'; message: string }
+  | { state: 'not-supported' };
+
+let updateState: UpdateState = app.isPackaged
+  ? { state: 'idle' }
+  : { state: 'not-supported' };
+
+function setUpdateState(next: UpdateState) {
+  updateState = next;
+  try {
+    mainWindow?.webContents.send('vf:update-event', updateState);
+  } catch (e) {
+    log.warn('forward update event failed', (e as Error).message);
+  }
+}
+
 function setupAutoUpdate() {
   if (!app.isPackaged) {
     log.info('skip auto-update (dev mode)');
@@ -401,56 +441,36 @@ function setupAutoUpdate() {
   }
   autoUpdater.logger = log;
   autoUpdater.autoDownload = true;
-  // Auto-install when the user quits the app — guarantees no in-progress
-  // canvas state is lost. If they never quit we still nudge them via the
-  // toast below.
+  // The UI button drives install timing — we still flip this on as a
+  // safety net so a forgotten window-close still installs the queued update.
   autoUpdater.autoInstallOnAppQuit = true;
 
+  autoUpdater.on('checking-for-update', () => setUpdateState({ state: 'checking' }));
   autoUpdater.on('update-available', (info) => {
     log.info('update-available', info?.version);
+    setUpdateState({ state: 'downloading', version: info?.version ?? '', percent: 0 });
   });
-
-  // Update is fully downloaded but we DON'T quit immediately — the user may
-  // be mid-edit on an unsaved workflow. Instead show a non-modal notification:
-  // "ready to install on next quit" with an optional 'Restart now' button.
-  // The actual install happens automatically when the user Cmd+Q's the app
-  // (autoInstallOnAppQuit above).
-  autoUpdater.on('update-downloaded', async (info) => {
-    log.info('update-downloaded', info?.version, '→ deferred install');
-    if (!mainWindow) return;
-    // Native macOS/Windows notification — appears in corner, doesn't block.
-    try {
-      const { Notification } = await import('electron');
-      if (Notification.isSupported()) {
-        const n = new Notification({
-          title: `Veo Farm — bản v${info?.version} đã tải xong`,
-          body: 'Sẽ tự cài khi bạn đóng app. Bấm để cài ngay (LƯU workflow trước!).',
-        });
-        n.on('click', async () => {
-          if (!mainWindow) return autoUpdater.quitAndInstall(true, true);
-          const res = await dialog.showMessageBox(mainWindow, {
-            type: 'warning',
-            title: 'Restart để cập nhật?',
-            message: `App sẽ đóng và cài v${info?.version} ngay.`,
-            detail:
-              'Mọi workflow CHƯA bấm "Lưu" sẽ MẤT. Hãy chắc chắn đã lưu trước khi bấm Restart.',
-            buttons: ['Restart ngay', 'Để khi đóng app'],
-            defaultId: 1,
-            cancelId: 1,
-          });
-          if (res.response === 0) autoUpdater.quitAndInstall(true, true);
-        });
-        n.show();
-      }
-    } catch (e) {
-      log.warn('notification failed', (e as Error).message);
+  autoUpdater.on('update-not-available', () => setUpdateState({ state: 'idle' }));
+  autoUpdater.on('download-progress', (p) => {
+    if (updateState.state === 'downloading') {
+      setUpdateState({
+        state: 'downloading',
+        version: updateState.version,
+        percent: Math.round(p.percent ?? 0),
+      });
     }
   });
-  autoUpdater.on('error', (err) => log.error('updater error', err));
+  autoUpdater.on('update-downloaded', (info) => {
+    log.info('update-downloaded', info?.version, '→ awaiting user click in UpdateBadge');
+    setUpdateState({ state: 'downloaded', version: info?.version ?? '' });
+  });
+  autoUpdater.on('error', (err) => {
+    log.error('updater error', err);
+    setUpdateState({ state: 'error', message: err?.message ?? String(err) });
+  });
 
-  // First check on launch + every 30 min so users get fixes faster.
-  autoUpdater.checkForUpdatesAndNotify().catch(() => {});
-  setInterval(() => autoUpdater.checkForUpdatesAndNotify().catch(() => {}), 30 * 60 * 1000);
+  autoUpdater.checkForUpdates().catch(() => {});
+  setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 30 * 60 * 1000);
 }
 
 // Compare the current app version against the last version we recorded on
@@ -486,18 +506,53 @@ ipcMain.handle('vf:set-user', (_evt, userId: string | null) => {
 });
 
 ipcMain.handle('vf:get-version', () => app.getVersion());
+ipcMain.handle('vf:update-status', () => updateState);
+ipcMain.handle('vf:update-check', async () => {
+  if (!app.isPackaged) return { ok: false, reason: 'dev-mode' };
+  try {
+    await autoUpdater.checkForUpdates();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, reason: (e as Error).message };
+  }
+});
+ipcMain.handle('vf:update-install', () => {
+  if (!app.isPackaged) return { ok: false, reason: 'dev-mode' };
+  if (updateState.state !== 'downloaded') {
+    return { ok: false, reason: `state=${updateState.state}` };
+  }
+  // isSilent=true → installer runs without UI. isForceRunAfter=true →
+  // re-launches the app once install completes. Children are tree-killed
+  // via the will-quit hook so the .exe lock is released first.
+  setTimeout(() => autoUpdater.quitAndInstall(true, true), 50);
+  return { ok: true };
+});
 
 app.whenReady().then(() => {
   createWindow();
   setupAutoUpdate();
 });
 
+// Win: kill child tree synchronously on close so the auto-updater's
+// installer doesn't see locked .exe files. Mac: dock keeps app alive,
+// don't quit on last window — match Electron defaults.
+let isQuitting = false;
 app.on('window-all-closed', () => {
-  killChildren();
   if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('before-quit', killChildren);
+app.on('before-quit', (e) => {
+  if (isQuitting) return;
+  e.preventDefault();
+  isQuitting = true;
+  killChildren()
+    .catch((err) => log.warn('killChildren error', err))
+    .finally(() => {
+      // Brief grace period so OS finishes reaping the killed PIDs before
+      // the installer starts. 600ms is plenty in practice.
+      setTimeout(() => app.quit(), 600);
+    });
+});
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();

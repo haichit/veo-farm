@@ -14,6 +14,7 @@ import {
   Workflow,
 } from 'lucide-react';
 import { SettingsModal } from './SettingsModal';
+import { UpdateBadge } from './UpdateBadge';
 
 interface TopNavProps {
   email: string;
@@ -78,6 +79,7 @@ export function TopNav({ email }: TopNavProps) {
 
       <div className="flex items-center gap-2">
         <ConnectionBadge />
+        <UpdateBadge />
         <span
           className="hidden sm:inline-block text-[11px] text-text-muted max-w-[180px] truncate"
           title={email}
