@@ -9,6 +9,28 @@ export async function claimAccount(
   retries = 5,
   pinnedAccountId?: string | null,
 ): Promise<Account> {
+  // Fail fast when the pin points at an account that's been deleted or
+  // belongs to another user — otherwise the user sees "not idle after 5
+  // retries" and has to guess what's wrong.
+  if (pinnedAccountId) {
+    const { data: row, error } = await supabase()
+      .from('accounts')
+      .select('id, status, label')
+      .eq('id', pinnedAccountId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (error) throw new Error(`claim_account preflight: ${error.message}`);
+    if (!row) {
+      throw new Error(
+        `Account đã pin (${pinnedAccountId.slice(0, 8)}...) không tồn tại hoặc đã bị xoá. Mở node, đổi dropdown Account sang "Tự động" hoặc chọn account khác.`,
+      );
+    }
+    if (row.status === 'expired' || row.status === 'die') {
+      throw new Error(
+        `Account "${row.label}" đang ${row.status} (cookies hết hạn). Vào tab Accounts → bấm 🛡️ Test cookies hoặc re-export cookies, hoặc đổi node sang account khác.`,
+      );
+    }
+  }
   for (let i = 0; i < retries; i++) {
     const { data, error } = pinnedAccountId
       ? await supabase().rpc('claim_specific_account', {

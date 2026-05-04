@@ -27,9 +27,15 @@ export function GenerateVideoNode(props: NodeProps) {
     duration?: number;
     accountId?: string | null;
   };
+  const knownIds = new Set(accounts.map((a) => a.id));
+  const pinnedMissing =
+    !!cfg.accountId && accounts.length > 0 && !knownIds.has(cfg.accountId);
   const accountOptions = [
     { value: 'auto', label: 'Tự động' },
     ...accounts.map((a) => ({ value: a.id, label: a.label })),
+    ...(pinnedMissing
+      ? [{ value: cfg.accountId as string, label: '⚠️ Account đã xoá' }]
+      : []),
   ];
 
   return (
