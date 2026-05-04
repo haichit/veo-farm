@@ -12,6 +12,7 @@ import { GeminiChatNode } from './GeminiChatNode';
 import { GenerateImageNode } from './GenerateImageNode';
 import { GenerateVideoNode } from './GenerateVideoNode';
 import { MergeVideoNode } from './MergeVideoNode';
+import { RemoveLogoNode } from './RemoveLogoNode';
 import { DownloadNode } from './DownloadNode';
 import { FrameNode } from './FrameNode';
 
@@ -26,6 +27,7 @@ export const customNodeTypes: NodeTypes = {
   generate_image: GenerateImageNode,
   generate_video: GenerateVideoNode,
   merge_video: MergeVideoNode,
+  remove_logo: RemoveLogoNode,
   download: DownloadNode,
   frame: FrameNode,
 };

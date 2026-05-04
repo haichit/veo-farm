@@ -3,18 +3,32 @@ import { decrypt } from './encryption.js';
 import type { Account, Cookie } from '@veo-farm/shared';
 import { logger } from './logger.js';
 
-export async function claimAccount(userId: string, providerId: string, retries = 5): Promise<Account> {
+export async function claimAccount(
+  userId: string,
+  providerId: string,
+  retries = 5,
+  pinnedAccountId?: string | null,
+): Promise<Account> {
   for (let i = 0; i < retries; i++) {
-    const { data, error } = await supabase().rpc('claim_account', {
-      p_user_id: userId,
-      p_provider_id: providerId,
-    });
+    const { data, error } = pinnedAccountId
+      ? await supabase().rpc('claim_specific_account', {
+          p_account_id: pinnedAccountId,
+          p_user_id: userId,
+        })
+      : await supabase().rpc('claim_account', {
+          p_user_id: userId,
+          p_provider_id: providerId,
+        });
     if (error) throw new Error(`claim_account: ${error.message}`);
     if (data && data.id) return data as Account;
-    logger.info({ providerId, attempt: i + 1 }, 'no idle account, waiting...');
+    logger.info({ providerId, pinnedAccountId, attempt: i + 1 }, 'no idle account, waiting...');
     await new Promise((r) => setTimeout(r, 5000 + i * 2000));
   }
-  throw new Error(`No idle account for provider=${providerId} after ${retries} retries`);
+  throw new Error(
+    pinnedAccountId
+      ? `Pinned account ${pinnedAccountId} not idle after ${retries} retries`
+      : `No idle account for provider=${providerId} after ${retries} retries`,
+  );
 }
 
 export async function releaseAccount(

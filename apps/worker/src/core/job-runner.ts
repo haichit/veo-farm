@@ -476,7 +476,7 @@ async function executeNode(node: FlowNode, inputs: Record<string, unknown>, job:
 // Node types that still fall back to a placeholder (real plugin wiring TBD).
 // generate_image + generate_video have real plugins now and short-circuit
 // before the stub branch in executeBuilderNode.
-const STUB_GENERATOR_TYPES = new Set(['gemini_prompt', 'gemini_prompt_kie', 'merge_video']);
+const STUB_GENERATOR_TYPES = new Set(['gemini_prompt', 'gemini_prompt_kie', 'merge_video', 'remove_logo']);
 const STUB_PLACEHOLDER_VIDEO =
   'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
 const STUB_PLACEHOLDER_IMAGE =
@@ -795,6 +795,7 @@ async function executeBuilderNode(
         quantity: cfg.quantity as number | undefined,
         quality: cfg.quality as string | undefined,
         imageModel: cfg.imageModel as string | undefined,
+        accountId: (cfg.accountId as string | null | undefined) ?? null,
       },
       userId: job.user_id,
       jobId: job.id,
@@ -824,6 +825,7 @@ async function executeBuilderNode(
             videoModel: cfg.videoModel as string | undefined,
             videoMode: cfg.videoMode as string | undefined,
             duration: cfg.duration as number | undefined,
+            accountId: (cfg.accountId as string | null | undefined) ?? null,
           },
           refs: { ...refs, startImageUrl: imageList[i] },
           userId: job.user_id,
@@ -848,6 +850,7 @@ async function executeBuilderNode(
             videoModel: cfg.videoModel as string | undefined,
             videoMode: cfg.videoMode as string | undefined,
             duration: cfg.duration as number | undefined,
+            accountId: (cfg.accountId as string | null | undefined) ?? null,
           },
           refs: { ...refs, startImageUrl: imageList[i] },
           userId: job.user_id,
@@ -872,6 +875,7 @@ async function executeBuilderNode(
             videoModel: cfg.videoModel as string | undefined,
             videoMode: cfg.videoMode as string | undefined,
             duration: cfg.duration as number | undefined,
+            accountId: (cfg.accountId as string | null | undefined) ?? null,
           },
           refs,
           userId: job.user_id,
@@ -894,6 +898,7 @@ async function executeBuilderNode(
         videoModel: cfg.videoModel as string | undefined,
         videoMode: cfg.videoMode as string | undefined,
         duration: cfg.duration as number | undefined,
+        accountId: (cfg.accountId as string | null | undefined) ?? null,
       },
       refs,
       userId: job.user_id,
@@ -931,6 +936,32 @@ async function executeBuilderNode(
       if (typeof v === 'string' && !urls.includes(v)) urls.push(v);
     }
     const out = await runMergeVideoNode({ videoUrls: urls, userId: job.user_id, jobId: job.id });
+    return { ...out, video: out.media[0]?.url };
+  }
+
+  if (node.type === 'remove_logo') {
+    const { runRemoveLogoNode } = await import('../plugins/builder/remove-logo.js');
+    const urls: string[] = [];
+    for (const e of incoming) {
+      const up = outputs.get(e.source);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const m = (up as any)?.media;
+      if (Array.isArray(m)) {
+        for (const item of m) {
+          if (item?.url && item.kind === 'video') urls.push(item.url);
+        }
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const v = (up as any)?.video;
+      if (typeof v === 'string' && !urls.includes(v)) urls.push(v);
+    }
+    const zoom = typeof cfg.zoom === 'number' ? (cfg.zoom as number) : undefined;
+    const out = await runRemoveLogoNode({
+      videoUrls: urls,
+      userId: job.user_id,
+      jobId: job.id,
+      zoom,
+    });
     return { ...out, video: out.media[0]?.url };
   }
 

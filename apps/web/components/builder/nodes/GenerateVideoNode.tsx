@@ -13,9 +13,11 @@ import {
   VIDEO_MODE_OPTIONS,
   formatVeoModelChip,
 } from '@/lib/builder/node-types';
+import { useVeo3Accounts } from '@/lib/builder/use-veo3-accounts';
 
 export function GenerateVideoNode(props: NodeProps) {
   const updateConfig = useFlowStore((s) => s.updateNodeConfig);
+  const { accounts } = useVeo3Accounts();
   const cfg = ((props.data as any)?.config ?? {}) as {
     ratio?: string;
     quantity?: number;
@@ -23,7 +25,12 @@ export function GenerateVideoNode(props: NodeProps) {
     videoModel?: string;
     videoMode?: string;
     duration?: number;
+    accountId?: string | null;
   };
+  const accountOptions = [
+    { value: 'auto', label: 'Tự động' },
+    ...accounts.map((a) => ({ value: a.id, label: a.label })),
+  ];
 
   return (
     <BaseNode {...props} runIcon="play">
@@ -61,6 +68,13 @@ export function GenerateVideoNode(props: NodeProps) {
             value={cfg.duration ?? 8}
             options={[...VIDEO_DURATION_OPTIONS]}
             onChange={(v) => updateConfig(props.id, { duration: v })}
+          />
+          <ConfigChip
+            value={cfg.accountId ?? 'auto'}
+            options={accountOptions}
+            onChange={(v) =>
+              updateConfig(props.id, { accountId: v === 'auto' ? null : v })
+            }
           />
         </div>
       </div>

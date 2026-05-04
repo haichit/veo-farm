@@ -66,6 +66,8 @@ export interface GenerateVideoNodeInput {
     videoMode?: string;
     /** 4 / 6 / 8 — Flow currently caps at 8s, longer values are clipped. */
     duration?: number;
+    /** Optional pinned account id — bypasses round-robin for this node. */
+    accountId?: string | null;
   };
   /** Resolved input ports beyond the primary text. */
   refs?: {
@@ -92,7 +94,7 @@ export async function runGenerateVideoNode(
   }
   await rateLimiter.throttle();
 
-  const account = await claimAccount(input.userId, 'veo3');
+  const account = await claimAccount(input.userId, 'veo3', 5, input.config?.accountId ?? null);
   const cookies = decryptCookies(account);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const meta = (account.meta ?? {}) as Record<string, any>;

@@ -620,6 +620,21 @@ export const useFlowStore = create<FlowStoreState>()(
       alert(`Lưu thất bại (network): ${(e as Error).message ?? e}`);
       return;
     }
+    // Stale client id (workflow was deleted on the server) — fall back to
+    // creating a fresh row so the user doesn't lose their canvas.
+    if (r.status === 404 && currentWorkflowId) {
+      console.warn('[saveWorkflow] stale id, creating new workflow', currentWorkflowId);
+      try {
+        r = await fetch('/api/workflows', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: payload.name, graph: payload }),
+        });
+      } catch (e) {
+        alert(`Lưu thất bại (network): ${(e as Error).message ?? e}`);
+        return;
+      }
+    }
     if (!r.ok) {
       const body = await r.text().catch(() => '');
       console.error('[saveWorkflow] failed', r.status, body);

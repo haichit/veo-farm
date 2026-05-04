@@ -62,6 +62,8 @@ export interface GenerateImageNodeInput {
     quantity?: number;
     quality?: string;
     imageModel?: string;
+    /** Optional pinned account id — bypasses round-robin for this node. */
+    accountId?: string | null;
   };
   /** Owner of the run — used for storage key prefix and account claim. */
   userId: string;
@@ -83,7 +85,7 @@ export async function runGenerateImageNode(
 
   // Reuse the same provider id Veo3 plugins use — same Google account works
   // for both image and video. Provider registered as 'veo3' in the UI.
-  const account = await claimAccount(input.userId, 'veo3');
+  const account = await claimAccount(input.userId, 'veo3', 5, input.config?.accountId ?? null);
   const cookies = decryptCookies(account);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const meta = (account.meta ?? {}) as Record<string, any>;

@@ -10,15 +10,22 @@ import {
   QUALITY_OPTIONS,
   QUANTITY_OPTIONS,
 } from '@/lib/builder/node-types';
+import { useVeo3Accounts } from '@/lib/builder/use-veo3-accounts';
 
 export function GenerateImageNode(props: NodeProps) {
   const updateConfig = useFlowStore((s) => s.updateNodeConfig);
+  const { accounts } = useVeo3Accounts();
   const cfg = ((props.data as any)?.config ?? {}) as {
     ratio?: string;
     quantity?: number;
     quality?: string;
     imageModel?: string;
+    accountId?: string | null;
   };
+  const accountOptions = [
+    { value: 'auto', label: 'Tự động' },
+    ...accounts.map((a) => ({ value: a.id, label: a.label })),
+  ];
 
   return (
     <BaseNode {...props} runIcon="play">
@@ -42,6 +49,13 @@ export function GenerateImageNode(props: NodeProps) {
           value={cfg.imageModel ?? 'imagen_4'}
           options={[...IMAGE_MODELS]}
           onChange={(v) => updateConfig(props.id, { imageModel: v })}
+        />
+        <ConfigChip
+          value={cfg.accountId ?? 'auto'}
+          options={accountOptions}
+          onChange={(v) =>
+            updateConfig(props.id, { accountId: v === 'auto' ? null : v })
+          }
         />
       </div>
     </BaseNode>

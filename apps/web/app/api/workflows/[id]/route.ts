@@ -27,8 +27,14 @@ export async function PATCH(req: Request, { params }: Ctx) {
     .update(update)
     .eq('id', params.id)
     .select('id, name, updated_at')
-    .single();
+    .maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (!data) {
+    return NextResponse.json(
+      { error: 'workflow_not_found', id: params.id },
+      { status: 404 },
+    );
+  }
   return NextResponse.json(data);
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "@veo-farm/desktop",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "private": true,
   "description": "Veo Farm — Electron desktop shell",
   "main": "dist/main.js",
