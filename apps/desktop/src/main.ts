@@ -516,15 +516,33 @@ ipcMain.handle('vf:update-check', async () => {
     return { ok: false, reason: (e as Error).message };
   }
 });
-ipcMain.handle('vf:update-install', () => {
+ipcMain.handle('vf:update-install', async () => {
   if (!app.isPackaged) return { ok: false, reason: 'dev-mode' };
   if (updateState.state !== 'downloaded') {
     return { ok: false, reason: `state=${updateState.state}` };
   }
-  // isSilent=true → installer runs without UI. isForceRunAfter=true →
-  // re-launches the app once install completes. Children are tree-killed
-  // via the will-quit hook so the .exe lock is released first.
-  setTimeout(() => autoUpdater.quitAndInstall(true, true), 50);
+  const v = updateState.version;
+  // OS-level notification — survives the main window closing so the user
+  // still sees install progress while electron-updater extracts files.
+  // We can't show a real progress bar (NSIS silent install gives no
+  // events), so the message is informational ("running ~30-60s").
+  try {
+    const { Notification } = await import('electron');
+    if (Notification.isSupported()) {
+      new Notification({
+        title: `Veo Farm — đang cài v${v}`,
+        body: 'App sẽ tự mở lại sau ~30-60 giây. Đừng tắt máy.',
+        silent: false,
+      }).show();
+    }
+  } catch (e) {
+    log.warn('install notification failed', (e as Error).message);
+  }
+  // 1.5s grace lets the renderer paint the in-app spinner + the OS
+  // notification render before the window vanishes. quitAndInstall fires
+  // before-quit which tree-kills children + waits 600ms before app.quit,
+  // so there's no .exe lock when the installer starts.
+  setTimeout(() => autoUpdater.quitAndInstall(true, true), 1500);
   return { ok: true };
 });
 
