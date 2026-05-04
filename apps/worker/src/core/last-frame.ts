@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { getFfmpegPath } from './ffmpeg-path.js';
 
 export async function extractLastFrame(videoUrl: string): Promise<Buffer> {
   const dir = mkdtempSync(join(tmpdir(), 'veo-frame-'));
@@ -51,7 +52,7 @@ function curlDownload(url: string): Promise<Buffer> {
 
 function runFfmpeg(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const p = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    const p = spawn(getFfmpegPath(), args, { stdio: ['ignore', 'ignore', 'pipe'] });
     let err = '';
     p.stderr.on('data', (c) => (err += c.toString()));
     p.on('close', (code) => {

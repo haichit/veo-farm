@@ -8,6 +8,7 @@ import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { getFfmpegPath } from '../../core/ffmpeg-path.js';
 import { downloadFromUrl, uploadBuffer } from '../../core/storage.js';
 import { logger } from '../../core/logger.js';
 
@@ -73,7 +74,7 @@ export async function runMergeVideoNode(
 
 function runFfmpeg(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const p = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    const p = spawn(getFfmpegPath(), args, { stdio: ['ignore', 'ignore', 'pipe'] });
     let err = '';
     p.stderr.on('data', (c) => (err += c.toString()));
     p.on('close', (code) => {

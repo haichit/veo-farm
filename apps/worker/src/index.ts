@@ -2,6 +2,7 @@ import './_loadEnv.js';
 import { spawnSync } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 import { logger } from './core/logger.js';
+import { getFfmpegPath } from './core/ffmpeg-path.js';
 import { supabase } from './core/supabase.js';
 import { runJob } from './core/job-runner.js';
 import { shutdownBrowser } from './core/playwright-pool.js';
@@ -63,10 +64,12 @@ async function processJob(job: any) {
 
 function checkSystemDeps() {
   // ffmpeg required for Concat node. Crash early with a clear message.
-  const ff = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' });
+  const ffPath = getFfmpegPath();
+  const ff = spawnSync(ffPath, ['-version'], { stdio: 'ignore' });
   if (ff.error || ff.status !== 0) {
     logger.fatal(
-      'ffmpeg not found in PATH. Install: `brew install ffmpeg` (macOS) / `apt install ffmpeg` (linux). Concat node will fail without it.',
+      { ffPath },
+      'ffmpeg not found. Set FFMPEG_PATH env or install: `brew install ffmpeg` (macOS) / `apt install ffmpeg` (linux). Concat node will fail without it.',
     );
     process.exit(1);
   }

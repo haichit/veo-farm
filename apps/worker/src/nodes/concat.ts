@@ -5,6 +5,9 @@ import ffmpeg from 'fluent-ffmpeg';
 import type { VideoOutput, VoiceOutput } from '@veo-farm/shared';
 import { downloadFromUrl, uploadBuffer } from '../core/storage.js';
 import { logger } from '../core/logger.js';
+import { getFfmpegPath } from '../core/ffmpeg-path.js';
+
+if (process.env.FFMPEG_PATH) ffmpeg.setFfmpegPath(getFfmpegPath());
 
 interface ConcatArgs {
   userId: string;
