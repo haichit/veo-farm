@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, Key, AlertCircle, Clock } from 'lucide-react';
+import { Plus, Trash2, Key, AlertCircle, Clock, ShieldCheck, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { Badge } from '@/components/ui/badge';
@@ -30,6 +30,7 @@ export default function AccountsPage() {
   const [items, setItems] = useState<Account[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [testingId, setTestingId] = useState<string | null>(null);
 
   async function load(showLoader = false) {
     if (showLoader) setLoading(true);
@@ -40,6 +41,29 @@ export default function AccountsPage() {
   useEffect(() => {
     load(true);
   }, []);
+
+  async function testCookies(id: string) {
+    setTestingId(id);
+    try {
+      const r = await fetch(`/api/accounts/${id}/test`, { method: 'POST' });
+      const data = await r.json();
+      if (data.skipped) {
+        alert('Test cookies hiện chỉ hỗ trợ provider Veo 3.');
+      } else if (data.ok) {
+        alert('✓ Cookies vẫn hoạt động (session live).');
+      } else {
+        alert(
+          `✗ Cookies KHÔNG còn hoạt động.\n\nLý do: ${data.reason}\n${data.finalUrl ? 'URL cuối: ' + data.finalUrl : ''}\n\nXoá account và thêm lại với cookies fresh.`,
+        );
+      }
+      // Refetch to pick up the status flip the API just did.
+      await load();
+    } catch (e) {
+      alert(`Test thất bại: ${(e as Error).message}`);
+    } finally {
+      setTestingId(null);
+    }
+  }
 
   async function del(id: string) {
     if (!confirm('Xoá account này?')) return;
@@ -169,6 +193,22 @@ export default function AccountsPage() {
                       return null;
                     })()}
                     <Badge status={a.status}>{a.status}</Badge>
+                    {p === 'veo3' && (
+                      <button
+                        type="button"
+                        onClick={() => testCookies(a.id)}
+                        disabled={testingId === a.id}
+                        className="p-1.5 rounded-lg text-text-muted hover:text-accent hover:bg-accent-glow transition-all disabled:opacity-50"
+                        aria-label="Test cookies"
+                        title="Kiểm tra cookies còn hoạt động không"
+                      >
+                        {testingId === a.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <ShieldCheck className="h-4 w-4" />
+                        )}
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => del(a.id)}

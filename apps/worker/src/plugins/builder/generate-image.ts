@@ -11,6 +11,7 @@ import { spawn } from 'node:child_process';
 import { ApiClient } from '../../_veo3_helpers/api-client.js';
 import { acquireTokenManager, dropTokenManager } from '../../_veo3_helpers/browser-pool.js';
 import { claimAccount, releaseAccount, decryptCookies } from '../../core/account-pool.js';
+import { isCookiesExpiredError } from '../../core/account-expiry.js';
 import { uploadBuffer } from '../../core/storage.js';
 import { logger } from '../../core/logger.js';
 import {
@@ -161,9 +162,9 @@ export async function runGenerateImageNode(
     // Mark the account expired so claimAccount stops picking it and the
     // user can re-login from /accounts.
     const msg = (err as Error)?.message ?? String(err);
-    if (/AUTH_ERROR_401|UNAUTHENTICATED/.test(msg)) {
-      logger.warn({ accountId: account.id }, 'generate_image: marking account expired (401)');
-      await releaseAccount(account.id, 0, 'expired');
+    if (isCookiesExpiredError(msg)) {
+      logger.warn({ accountId: account.id, msg: msg.slice(0, 200) }, 'generate_image: marking account expired (cookies dead)');
+      await releaseAccount(account.id, 0, 'expired', msg.slice(0, 500));
     } else {
       await releaseAccount(account.id, 0, 'idle');
     }

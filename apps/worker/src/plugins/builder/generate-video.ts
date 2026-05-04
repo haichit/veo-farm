@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import { ApiClient } from '../../_veo3_helpers/api-client.js';
 import { acquireTokenManager, dropTokenManager } from '../../_veo3_helpers/browser-pool.js';
 import { claimAccount, releaseAccount, decryptCookies } from '../../core/account-pool.js';
+import { isCookiesExpiredError } from '../../core/account-expiry.js';
 import { uploadBuffer, downloadFromUrl } from '../../core/storage.js';
 import { logger } from '../../core/logger.js';
 import { RateLimiter } from '../../core/concurrency.js';
@@ -251,9 +252,9 @@ export async function runGenerateVideoNode(
     await dropTokenManager(account.id);
 
     const msg = (err as Error)?.message ?? String(err);
-    if (/AUTH_ERROR_401|UNAUTHENTICATED/.test(msg)) {
-      logger.warn({ accountId: account.id }, 'generate_video: marking account expired (401)');
-      await releaseAccount(account.id, 0, 'expired');
+    if (isCookiesExpiredError(msg)) {
+      logger.warn({ accountId: account.id, msg: msg.slice(0, 200) }, 'generate_video: marking account expired (cookies dead)');
+      await releaseAccount(account.id, 0, 'expired', msg.slice(0, 500));
     } else {
       await releaseAccount(account.id, 0, 'idle');
     }
