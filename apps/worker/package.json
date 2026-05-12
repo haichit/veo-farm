@@ -35,11 +35,13 @@
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "selfsigned": "2.4.1",
     "socket.io": "^4.8.3",
+    "ws": "^8.18.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {
     "@types/fluent-ffmpeg": "^2.1.24",
     "@types/node": "^20.0.0",
+    "@types/ws": "^8.5.13",
     "tsx": "^4.19.0",
     "typescript": "^5.4.0"
   }
