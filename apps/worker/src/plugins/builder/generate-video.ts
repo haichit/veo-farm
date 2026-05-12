@@ -48,10 +48,26 @@ function mimeFromUrl(url: string, buf: Buffer): string {
 function mapModel(
   videoModel: string | undefined,
 ): 'veo_3_1_lite' | 'veo_3_1_fast' | 'veo_3_1_quality' {
-  if (!videoModel) return 'veo_3_1_fast';
+  if (!videoModel) return 'veo_3_1_lite';
   if (videoModel.startsWith('veo31_lite')) return 'veo_3_1_lite';
   if (videoModel.startsWith('veo31_quality')) return 'veo_3_1_quality';
-  return 'veo_3_1_fast';
+  if (videoModel.startsWith('veo31_fast')) return 'veo_3_1_fast';
+  return 'veo_3_1_lite';
+}
+
+// Server enforces (tier × model) combinations:
+//   - veo_3_1_lite, veo_3_1_quality → accessible on PAYGATE_TIER_ONE (free accounts)
+//   - veo_3_1_fast → requires PAYGATE_TIER_TWO (Pro plan)
+// Probed empirically against a free Google account: tier ONE accepts lite +
+// quality, rejects fast with PUBLIC_ERROR_MODEL_ACCESS_DENIED. tier TWO accepts
+// fast on Pro accounts. PAYGATE_TIER_FREE is NOT a valid enum (server 400s).
+function defaultTierFor(
+  model: 'veo_3_1_lite' | 'veo_3_1_fast' | 'veo_3_1_quality',
+):
+  | 'PAYGATE_TIER_ONE'
+  | 'PAYGATE_TIER_TWO' {
+  if (model === 'veo_3_1_fast') return 'PAYGATE_TIER_TWO';
+  return 'PAYGATE_TIER_ONE';
 }
 
 export interface GenerateVideoNodeInput {
@@ -125,8 +141,10 @@ export async function runGenerateVideoNode(
 
   let leaseHeld = true;
   try {
-    const client = new ApiClient(lease.tm, {
-      paygateTier: 'PAYGATE_TIER_TWO',
+    let model = mapModel(input.config.videoModel);
+    let tier = defaultTierFor(model);
+    let client = new ApiClient(lease.tm, {
+      paygateTier: tier,
       projectId: projectId ?? null,
     });
 
@@ -159,6 +177,8 @@ export async function runGenerateVideoNode(
     logger.info(
       {
         mode,
+        model,
+        tier,
         hasStart: !!startImageId,
         hasEnd: !!endImageId,
         refs: refMediaIds.length,
@@ -166,14 +186,44 @@ export async function runGenerateVideoNode(
       'generate_video: starting API call',
     );
 
-    const startResult = await client.generateVideo(input.prompt, {
-      aspectRatio: mapAspect(input.config.ratio),
-      count: Math.max(1, Math.min(input.config.quantity ?? 1, 4)),
-      model: mapModel(input.config.videoModel),
-      startImageId,
-      endImageId,
-      referenceImages: refMediaIds.length > 0 ? refMediaIds : undefined,
-    });
+    const callGenerate = () =>
+      client.generateVideo(input.prompt, {
+        aspectRatio: mapAspect(input.config.ratio),
+        count: Math.max(1, Math.min(input.config.quantity ?? 1, 4)),
+        model,
+        startImageId,
+        endImageId,
+        referenceImages: refMediaIds.length > 0 ? refMediaIds : undefined,
+      });
+
+    let startResult: Awaited<ReturnType<typeof callGenerate>>;
+    try {
+      startResult = await callGenerate();
+    } catch (apiErr) {
+      // Account doesn't have access to the chosen model (typically free Google
+      // accounts that picked Fast/Quality — those need a paid plan). Retry
+      // with Lite, which every tier can access. We swallow the original error
+      // so the UI sees the working fallback path instead of an opaque 403.
+      const apiMsg = (apiErr as Error)?.message ?? String(apiErr);
+      const isModelDenied =
+        apiMsg.includes('PUBLIC_ERROR_MODEL_ACCESS_DENIED') ||
+        (apiMsg.includes('AUTH_ERROR_403') && apiMsg.includes('PERMISSION_DENIED'));
+      if (!isModelDenied || model === 'veo_3_1_lite') throw apiErr;
+
+      const prevModel = model;
+      const prevTier = tier;
+      model = 'veo_3_1_lite';
+      tier = 'PAYGATE_TIER_ONE';
+      client = new ApiClient(lease.tm, {
+        paygateTier: tier,
+        projectId: projectId ?? null,
+      });
+      logger.warn(
+        { prevModel, prevTier, model, tier },
+        'generate_video: model access denied — falling back to Lite',
+      );
+      startResult = await callGenerate();
+    }
 
     const media = (startResult.media ?? []).map((m) => ({
       name: m.name,
