@@ -217,6 +217,24 @@ function spawnWorker(userId: string | null) {
   children.push(child);
 }
 
+// Start the captcha-server sidecar bundled alongside the worker. It listens
+// on https://127.0.0.1:3456 (self-signed cert auto-generated into
+// ~/.veo-farm-captcha-cert on first boot) and brokers reCAPTCHA Enterprise
+// tokens between the worker and Brave's content-script extension.
+function spawnCaptchaServer() {
+  const workerDir = resolveResource('worker');
+  const captchaEntry = path.join(workerDir, 'captcha-server', 'server.js');
+  if (!fs.existsSync(captchaEntry)) {
+    log.warn(`captcha-server entry not found at ${captchaEntry} — skipping`);
+    return;
+  }
+  spawnChild('captcha', process.execPath, [captchaEntry], {
+    ELECTRON_RUN_AS_NODE: '1',
+    CAPTCHA_PORT: process.env.CAPTCHA_PORT ?? '3456',
+    CAPTCHA_MODE: process.env.CAPTCHA_MODE ?? 'auto',
+  });
+}
+
 async function startEmbeddedServer(): Promise<string> {
   const port = await findOpenPort();
   const webRoot = resolveResource('web');
@@ -231,6 +249,13 @@ async function startEmbeddedServer(): Promise<string> {
     ELECTRON_RUN_AS_NODE: '1',
     ...RUNTIME_ENV,
   });
+
+  // Captcha-server is a sibling sidecar to the worker — Brave's extension
+  // connects to it over Socket.IO to ask for a fresh reCAPTCHA Enterprise
+  // token whenever Google flags the request as UNUSUAL_ACTIVITY. Without it,
+  // the rotate path fails with `ECONNREFUSED 127.0.0.1:3456` and any video
+  // gen that triggers anti-bot escalates into a hard error.
+  spawnCaptchaServer();
 
   // Worker spawned later — once the renderer signals which user is logged in
   // (see ipcMain.handle('vf:set-user') below). Worker stays idle until then,
