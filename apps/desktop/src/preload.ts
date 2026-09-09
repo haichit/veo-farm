@@ -3,6 +3,8 @@ import { contextBridge, ipcRenderer } from 'electron';
 contextBridge.exposeInMainWorld('veoFarmDesktop', {
   setCurrentUser: (userId: string | null) => ipcRenderer.invoke('vf:set-user', userId),
   getAppVersion: () => ipcRenderer.invoke('vf:get-version'),
+  bulkDownload: (files: Array<{ url: string; filename: string }>) =>
+    ipcRenderer.invoke('vf:bulk-download', files),
   update: {
     getStatus: () => ipcRenderer.invoke('vf:update-status'),
     check: () => ipcRenderer.invoke('vf:update-check'),

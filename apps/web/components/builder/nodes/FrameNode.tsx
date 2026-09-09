@@ -5,6 +5,7 @@ import { NodeResizer, type NodeProps } from '@xyflow/react';
 import { Frame as FrameIcon, Play } from 'lucide-react';
 import { useFlowStore, type BuilderNodeData } from '@/lib/builder/flow-store';
 import { useWorkflowRun } from '@/lib/builder/use-workflow-run';
+import { BulkDownloadButton } from '../BulkDownloadButton';
 
 // Frame node — bounding-box visual container. Header bar floating top -34px is
 // the only pointer-events:auto region; body is pointer-events:none so clicks
@@ -21,7 +22,31 @@ export function FrameNode(props: NodeProps) {
   const h = (props.height as number | undefined) ?? cfg?.height ?? 400;
   const updateConfig = useFlowStore((s) => s.updateNodeConfig);
   const scaleNodesInFrame = useFlowStore((s) => s.scaleNodesInFrame);
+  const selectMany = useFlowStore((s) => s.selectMany);
+  const setNodes = useFlowStore((s) => s.setNodes);
+  const frameNodes = useFlowStore((s) =>
+    s.nodes.filter((n) => (n.data as { frameId?: string } | undefined)?.frameId === id),
+  );
   const { startRun } = useWorkflowRun();
+
+  // Clicking the frame selects it AND every node inside it (by data.frameId,
+  // same field the drag-together logic uses) — so "Chạy N đã chọn" in the
+  // toolbar can run a whole frame's worth of nodes without having to
+  // Shift-drag a marquee over it by hand.
+  function onSelectFrame(e: React.MouseEvent) {
+    // React Flow's own node-click-selection runs on this same click (it
+    // narrows selection down to just the frame), which would otherwise fire
+    // right after this handler and stomp our broader selection back to 1.
+    // Stopping propagation here keeps it from ever reaching RF's handler.
+    e.stopPropagation();
+    const allNodes = useFlowStore.getState().nodes;
+    const idsInFrame = allNodes
+      .filter((n) => (n.data as { frameId?: string } | undefined)?.frameId === id)
+      .map((n) => n.id);
+    const ids = [id, ...idsInFrame];
+    selectMany(ids);
+    setNodes(allNodes.map((n) => ({ ...n, selected: ids.includes(n.id) })));
+  }
   // Track frame box at the moment NodeResizer started so we scale children
   // relative to the OLD bounding box (not the live one which mutates per frame).
   const resizeStart = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -95,6 +120,7 @@ export function FrameNode(props: NodeProps) {
       </div>
       {/* Floating header bar above the frame — clickable */}
       <div
+        onClick={onSelectFrame}
         className="absolute -top-[34px] left-0 right-0 h-[28px] flex items-center gap-2 px-3 rounded-md pointer-events-auto"
         style={{
           background: 'rgba(245, 158, 11, 0.12)',
@@ -122,6 +148,7 @@ export function FrameNode(props: NodeProps) {
         >
           <Play size={10} /> Run frame
         </button>
+        <BulkDownloadButton nodes={frameNodes} compact />
       </div>
 
       {/* Body — dashed amber container, pointer-events:none */}

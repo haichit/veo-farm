@@ -3,6 +3,7 @@
 import { Image as ImageIcon, Trash2, X, Download } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useFlowStore } from '@/lib/builder/flow-store';
+import { downloadMediaUrl, inferMediaFilename } from '@/lib/download-media';
 import { Lightbox } from './preview/Lightbox';
 
 // Fullscreen overlay (z-9000) showing every media output collected this
@@ -102,12 +103,9 @@ export function AlbumGalleryOverlay() {
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    const a = document.createElement('a');
-                    a.href = m.url;
-                    a.target = '_blank';
-                    a.rel = 'noopener';
-                    a.download = '';
-                    a.click();
+                    downloadMediaUrl(m.url, inferMediaFilename(m.url, m.kind, i + 1)).catch((err) => {
+                      alert(`Tải xuống thất bại: ${(err as Error).message ?? err}`);
+                    });
                   }}
                   className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center w-8 h-8 rounded-md bg-black/60 hover:bg-black/80 text-white"
                   title="Tải xuống"

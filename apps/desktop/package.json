@@ -1,6 +1,6 @@
 {
   "name": "@veo-farm/desktop",
-  "version": "0.1.20",
+  "version": "0.1.22",
   "private": true,
   "description": "Veo Farm — Electron desktop shell",
   "main": "dist/main.js",
@@ -48,6 +48,7 @@
     "appId": "com.veofarm.app",
     "productName": "Veo Farm",
     "electronVersion": "31.7.7",
+    "npmRebuild": false,
     "asar": true,
     "asarUnpack": [
       "node_modules/**/*"
@@ -61,6 +62,10 @@
       "package.json"
     ],
     "extraResources": [
+      {
+        "from": "../../.env",
+        "to": "secrets.env"
+      },
       {
         "from": "../web/.next/standalone",
         "to": "web",
@@ -124,6 +129,9 @@
       }
     ],
     "win": {
+      "forceCodeSigning": false,
+      "verifyUpdateCodeSignature": false,
+      "signAndEditExecutable": false,
       "target": [
         {
           "target": "nsis",

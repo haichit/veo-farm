@@ -44,6 +44,7 @@ export const BUILDER_NODE_TYPES = [
   'generate_video',
   'merge_video',
   'remove_logo',
+  'extract_last_frame',
   'download',
   'frame',
 ] as const;
@@ -168,7 +169,7 @@ export const NODE_TYPES: Record<BuilderNodeType, NodeTypeDef> = {
       ratio: 'landscape',
       quantity: 1,
       quality: '1080p',
-      imageModel: 'imagen_4',
+      imageModel: 'nano_banana_pro',
       accountId: null,
     },
     width: 260,
@@ -186,7 +187,7 @@ export const NODE_TYPES: Record<BuilderNodeType, NodeTypeDef> = {
       ratio: 'landscape',
       quantity: 1,
       quality: '1080p',
-      videoModel: 'veo31_fast_lower',
+      videoModel: 'veo31_lite_lower',
       videoMode: 'FRAME',
       duration: 8,
       accountId: null,
@@ -215,6 +216,18 @@ export const NODE_TYPES: Record<BuilderNodeType, NodeTypeDef> = {
     inputs: [{ name: 'video', type: 'video', color: PORT_COLORS.video }],
     outputs: [{ name: 'video', type: 'video', color: PORT_COLORS.video }],
     defaults: { zoom: 1.07 },
+    width: 240,
+    minHeight: 100,
+  },
+  extract_last_frame: {
+    type: 'extract_last_frame',
+    label: '🖼️ Khung Cuối Video',
+    category: 'generate',
+    color: '#22d3ee',
+    icon: 'Camera',
+    inputs: [{ name: 'video', type: 'video', color: PORT_COLORS.video }],
+    outputs: [{ name: 'image', type: 'image', color: PORT_COLORS.image }],
+    defaults: {},
     width: 240,
     minHeight: 100,
   },
@@ -298,9 +311,11 @@ export const VEO_MODELS = [
   { value: 'veo31_quality', label: 'Veo 3 Quality', subtitle: 'Chất lượng cao' },
 ] as const;
 
+// Imagen 4 / Imagen 4 Ref removed from the picker — Google's Sep 2026 Flow
+// rewrite broke their generation request shape (RPC error code=5/NOT_FOUND)
+// and nobody's captured a working HAR for them yet. Only these two are
+// confirmed working against the new batchexecute protocol.
 export const IMAGE_MODELS = [
-  { value: 'imagen_4', label: 'Imagen 4' },
-  { value: 'imagen_4_ref', label: 'Imagen 4 Ref' },
   { value: 'nano_banana_pro', label: 'NB-Pro' },
   { value: 'nano_banana_2', label: 'NB-2' },
 ] as const;

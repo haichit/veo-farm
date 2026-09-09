@@ -482,6 +482,58 @@ const STUB_PLACEHOLDER_VIDEO =
 const STUB_PLACEHOLDER_IMAGE =
   'https://images.unsplash.com/photo-1519681393784-d120267933ba?w=800';
 
+// Merges each node's generated output (image/video/text) into the saved
+// workflow's `graph.nodes[].data` so it survives independently of whichever
+// browser session (if any) triggered the run. Best-effort — a workflow that
+// was renamed/deleted mid-run, or a job with no workflow_id (ad-hoc/unsaved
+// run), just skips silently.
+async function syncOutputsToWorkflowGraph(job: Job, outputs: Map<string, unknown>): Promise<void> {
+  if (!job.workflow_id) return;
+  try {
+    const { data: wf } = await supabase()
+      .from('workflows')
+      .select('graph')
+      .eq('id', job.workflow_id)
+      .maybeSingle();
+    const wfGraph = (wf as { graph?: { nodes?: Array<{ id: string; data?: Record<string, unknown> }> } } | null)
+      ?.graph;
+    if (!wfGraph?.nodes) return;
+
+    let changed = false;
+    const nodes = wfGraph.nodes.map((n) => {
+      const out = outputs.get(n.id);
+      if (!out || typeof out !== 'object') return n;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const o = out as any;
+      const media = Array.isArray(o.media) && o.media.length > 0
+        ? o.media
+        : typeof o.image === 'string'
+          ? [{ url: o.image, kind: 'image' }]
+          : typeof o.video === 'string'
+            ? [{ url: o.video, kind: 'video' }]
+            : null;
+      const text = typeof o.text === 'string' ? o.text : undefined;
+      if (!media && text === undefined) return n;
+      changed = true;
+      return {
+        ...n,
+        data: {
+          ...n.data,
+          ...(media ? { previewMedia: media } : {}),
+          ...(text !== undefined ? { lastOutputText: text } : {}),
+        },
+      };
+    });
+    if (!changed) return;
+    await supabase()
+      .from('workflows')
+      .update({ graph: { ...wfGraph, nodes } })
+      .eq('id', job.workflow_id);
+  } catch (e) {
+    logger.warn({ jobId: job.id, workflowId: job.workflow_id, err: e }, 'runBuilder: failed to sync outputs into workflow graph');
+  }
+}
+
 async function runBuilderStub(job: Job): Promise<{ outputUrl: string }> {
   const graph = job.flow_graph!;
   const order = graph.executionOrder ?? graph.nodes.map((n) => n.id);
@@ -519,6 +571,15 @@ async function runBuilderStub(job: Job): Promise<{ outputUrl: string }> {
     });
   }
 
+  // Nodes that failed, or that got skipped because an upstream node failed.
+  // `order` is topological, so by the time we reach a node its upstream
+  // nodes have already been processed — checking incoming sources against
+  // this set cascades the block down the branch naturally, without needing
+  // to precompute descendants. Independent branches (no edge back to a
+  // failed node) are untouched and keep running.
+  const failedOrBlocked = new Set<string>();
+  let hadFailure = false;
+
   logger.info(
     { jobId: job.id, total, cachedReuseCount: cachedNodeIds.size },
     'runBuilder: start',
@@ -548,6 +609,38 @@ async function runBuilderStub(job: Job): Promise<{ outputUrl: string }> {
         .single();
       void subJob;
       done += 1;
+      wait = Math.max(0, total - done - err);
+      await supabase().from('jobs').update({ stats: { done, wait, err } }).eq('id', job.id);
+      continue;
+    }
+
+    // An upstream node on this node's own branch already failed — this node
+    // has no valid inputs, so there's no point attempting it. Mark it failed
+    // without running, and keep cascading the block to ITS downstream too.
+    // Nodes on unrelated branches (no incoming edge from a blocked node)
+    // aren't touched and run normally.
+    const incoming = incomingByNode.get(nodeId) ?? [];
+    const blockedBy = incoming.find((e) => failedOrBlocked.has(e.source));
+    if (blockedBy) {
+      logger.info(
+        { jobId: job.id, nodeId, blockedBy: blockedBy.source },
+        'runBuilder: skipping — upstream node failed',
+      );
+      failedOrBlocked.add(nodeId);
+      hadFailure = true;
+      await supabase()
+        .from('sub_jobs')
+        .insert({
+          job_id: job.id,
+          node_id: nodeId,
+          node_type: node.type,
+          status: 'failed',
+          input: node.data?.config ?? {},
+          error: `skipped — upstream node ${blockedBy.source} failed`,
+          started_at: new Date().toISOString(),
+          finished_at: new Date().toISOString(),
+        });
+      err += 1;
       wait = Math.max(0, total - done - err);
       await supabase().from('jobs').update({ stats: { done, wait, err } }).eq('id', job.id);
       continue;
@@ -617,12 +710,32 @@ async function runBuilderStub(job: Job): Promise<{ outputUrl: string }> {
       .eq('id', job.id);
 
     if (nodeFailed) {
-      // Stop the run on first hard failure — downstream nodes have no inputs.
-      throw new Error(`node ${nodeId} (${node.type}) failed: ${nodeError}`);
+      // Don't stop the whole run — block only this node's own downstream
+      // (cascaded via failedOrBlocked above) and keep going so independent
+      // branches still finish. The job is still reported as failed at the
+      // end (see hadFailure below) so retry/error UI keeps working.
+      failedOrBlocked.add(nodeId);
+      hadFailure = true;
     }
   }
 
-  logger.info({ jobId: job.id, done }, 'runBuilder: complete');
+  logger.info({ jobId: job.id, done, err }, 'runBuilder: complete');
+
+  // Write every node's generated output back into the saved workflow's own
+  // graph — not just sub_jobs. Without this, a run only shows up live in
+  // whichever browser session started it (via Realtime + the Canvas store),
+  // and the user has to click "Lưu" for it to stick; a run kicked off
+  // externally (API key, no browser open) had no session to do that at all,
+  // so its results were permanently stranded in sub_jobs even though
+  // generation succeeded. Runs on every job tied to a saved workflow,
+  // Canvas-triggered or not, and happens even on partial failure so
+  // whatever DID succeed is still visible.
+  await syncOutputsToWorkflowGraph(job, outputs);
+
+  if (hadFailure) {
+    throw new Error(`${err} node(s) failed — see sub_jobs for details`);
+  }
+
   // Best-effort terminal output url — first downloadable media we produced.
   for (const v of outputs.values()) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -674,6 +787,31 @@ function resolvePromptList(
     }
   }
   return null;
+}
+
+// Resolve reference-image URLs wired into a generate_image node's ref-image
+// ports (input-1, input-2, ... — dynamic-ports.ts grows these as they get
+// connected). Only the first is currently sent (see api-client.ts's
+// generateImages — Flow's ogiZ0b payload only carries a single refImageId).
+function resolveImageRefUrls(
+  incoming: Array<{ source: string; targetHandle?: string }>,
+  outputs: Map<string, unknown>,
+): string[] {
+  const urls: string[] = [];
+  for (const e of incoming) {
+    if (!e.targetHandle || e.targetHandle === 'input-0') continue;
+    const up = outputs.get(e.source);
+    if (!up || typeof up !== 'object') continue;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const o = up as any;
+    if (typeof o.image === 'string') urls.push(o.image);
+    else if (typeof o.imageUrl === 'string') urls.push(o.imageUrl);
+    else if (Array.isArray(o.media)) {
+      const first = o.media.find((m: { url?: string; kind?: string }) => m?.url && m.kind !== 'video');
+      if (first?.url) urls.push(first.url);
+    }
+  }
+  return urls;
 }
 
 // Resolve image inputs for a generate_video node. Port indexes follow
@@ -764,6 +902,7 @@ async function executeBuilderNode(
     // Fan-out: if upstream is a prompt_list, run once per line and merge
     // the resulting media arrays. Single-prompt path is unchanged.
     const promptList = resolvePromptList(incoming, outputs);
+    const refImageUrls = resolveImageRefUrls(incoming, outputs);
     if (promptList && promptList.length > 1) {
       const allMedia: Array<Record<string, unknown>> = [];
       for (let i = 0; i < promptList.length; i++) {
@@ -777,6 +916,7 @@ async function executeBuilderNode(
             quality: cfg.quality as string | undefined,
             imageModel: cfg.imageModel as string | undefined,
           },
+          refImageUrls,
           userId: job.user_id,
           jobId: job.id,
         });
@@ -797,6 +937,7 @@ async function executeBuilderNode(
         imageModel: cfg.imageModel as string | undefined,
         accountId: (cfg.accountId as string | null | undefined) ?? null,
       },
+      refImageUrls,
       userId: job.user_id,
       jobId: job.id,
     });
@@ -963,6 +1104,26 @@ async function executeBuilderNode(
       zoom,
     });
     return { ...out, video: out.media[0]?.url };
+  }
+
+  if (node.type === 'extract_last_frame') {
+    const { runExtractLastFrameNode } = await import('../plugins/builder/extract-last-frame.js');
+    const urls: string[] = [];
+    for (const e of incoming) {
+      const up = outputs.get(e.source);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const m = (up as any)?.media;
+      if (Array.isArray(m)) {
+        for (const item of m) {
+          if (item?.url && item.kind === 'video') urls.push(item.url);
+        }
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const v = (up as any)?.video;
+      if (typeof v === 'string' && !urls.includes(v)) urls.push(v);
+    }
+    const out = await runExtractLastFrameNode({ videoUrls: urls, userId: job.user_id, jobId: job.id });
+    return { ...out, image: out.media[0]?.url };
   }
 
   if (node.type === 'gemini_chat') {

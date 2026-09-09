@@ -23,7 +23,9 @@ const err = (...a) => console.error('[Veo-Farm-BG] ❌', ...a);
 
 function findLabsTab() {
   return new Promise((resolve) => {
-    chrome.tabs.query({ url: 'https://labs.google/*' }, (tabs) => {
+    // Google moved Flow's authenticated app off labs.google onto its own
+    // domain (Sep 2026) — match both so this keeps working either way.
+    chrome.tabs.query({ url: ['https://labs.google/*', 'https://flow.google.com/*'] }, (tabs) => {
       resolve(tabs && tabs.length > 0 ? tabs[0] : null);
     });
   });

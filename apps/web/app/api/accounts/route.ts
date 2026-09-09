@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { encrypt } from '@/lib/encryption';
 import { schemas } from '@veo-farm/shared';
-import { normalizeCookies } from '@/lib/cookies-normalize';
+import { normalizeCookies, computeCookiesExpireAt } from '@/lib/cookies-normalize';
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -62,20 +62,10 @@ export async function POST(req: Request) {
   const { provider_id, label, cookies, meta } = parsed.data;
   const cookies_encrypted = encrypt(JSON.stringify(cookies));
 
-  // Find earliest expiration across all cookies that have one (some are session-only).
-  // Stored as ISO string in meta so UI can warn before login breaks.
-  const expirations = cookies
-    .map((c: any) => {
-      const v = c.expires ?? c.expirationDate;
-      if (typeof v !== 'number') return null;
-      const ms = v < 1e12 ? v * 1000 : v; // seconds vs ms
-      return ms;
-    })
-    .filter((n): n is number => typeof n === 'number' && n > Date.now());
-  const minExpires = expirations.length > 0 ? Math.min(...expirations) : null;
+  const expireAt = computeCookiesExpireAt(cookies);
   const enrichedMeta = {
     ...(meta ?? {}),
-    ...(minExpires ? { cookies_expire_at: new Date(minExpires).toISOString() } : {}),
+    ...(expireAt ? { cookies_expire_at: expireAt } : {}),
   };
 
   const { data, error } = await sb

@@ -40,7 +40,7 @@ export default function WorkflowsListPage() {
           <p className="text-sm text-text-muted mt-1">Mọi workflow đã lưu từ Canvas</p>
         </div>
         <Link
-          href="/canvas"
+          href="/canvas?new=1"
           className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold bg-gradient-to-br from-accent to-accent-hover text-white shadow-accent-glow hover:shadow-accent-glow-lg transition-all"
         >
           <Plus size={16} /> Tạo mới
@@ -54,7 +54,7 @@ export default function WorkflowsListPage() {
           <Workflow className="w-10 h-10 mx-auto text-text-muted opacity-50 mb-3" />
           <p className="text-text-muted text-sm mb-4">Chưa có workflow nào.</p>
           <Link
-            href="/canvas"
+            href="/canvas?new=1"
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-white hover:bg-accent-hover transition-colors"
           >
             <Plus size={16} /> Tạo workflow đầu tiên

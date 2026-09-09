@@ -4,6 +4,9 @@ import { useState } from 'react';
 import { Play, Pause, Save, Square, Image as ImageIcon, ZoomIn, RotateCcw, Trash2 } from 'lucide-react';
 import { useReactFlow } from '@xyflow/react';
 import { useFlowStore } from '@/lib/builder/flow-store';
+import { useWorkflowRun } from '@/lib/builder/use-workflow-run';
+import { JobQueueBadge } from './JobQueueBadge';
+import { BulkDownloadButton } from './BulkDownloadButton';
 import type { WorkflowJSON } from '@veo-farm/shared';
 
 // Top toolbar inside the canvas column — Run/Pause/Stop + stats counter +
@@ -25,8 +28,15 @@ export function BuilderToolbar() {
   const currentWorkflowName = useFlowStore((s) => s.currentWorkflowName);
   const setCurrentWorkflow = useFlowStore((s) => s.setCurrentWorkflow);
   const saveWorkflow = useFlowStore((s) => s.saveWorkflow);
+  const selectedNodeIds = useFlowStore((s) => s.selectedNodeIds);
   const { fitView } = useReactFlow();
+  const { startRun: startPartialRun } = useWorkflowRun();
   const [saving, setSaving] = useState(false);
+
+  async function startSelectedRun() {
+    if (selectedNodeIds.length === 0) return;
+    await startPartialRun(selectedNodeIds);
+  }
 
   async function onSaveClick() {
     let name = currentWorkflowName;
@@ -146,6 +156,18 @@ export function BuilderToolbar() {
         {saving ? 'Đang lưu…' : 'Lưu'}
       </button>
 
+      {selectedNodeIds.length > 0 && runState !== 'running' && (
+        <button
+          type="button"
+          onClick={startSelectedRun}
+          title="Chỉ chạy các node đang chọn (bôi đen bằng Shift+drag hoặc Ctrl/Cmd+click) — dùng output hiện có của các node upstream chưa chọn"
+          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-semibold border border-accent/40 bg-accent/10 text-accent hover:bg-accent/20 transition-all"
+        >
+          <Play size={15} />
+          Chạy {selectedNodeIds.length} đã chọn
+        </button>
+      )}
+
       {runState === 'running' && (
         <button
           type="button"
@@ -173,6 +195,10 @@ export function BuilderToolbar() {
         <Stat label="Chờ" value={stats.wait} variant="wait" />
         <Stat label="Lỗi" value={stats.err} variant="err" />
       </div>
+
+      <JobQueueBadge />
+
+      <BulkDownloadButton nodes={nodes} />
 
       <button
         type="button"

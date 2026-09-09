@@ -46,9 +46,19 @@ function Thumb({
   total: number;
   onOpen: () => void;
 }) {
+  // A single item shows at its real aspect ratio (capped by max-height) so a
+  // portrait 9:16 image/video isn't forced into a 16:9 box and cropped down
+  // to a near-square sliver via object-cover. Grids of 2+ still use a fixed
+  // 16:9 cell — needed for a uniform grid when mixing different aspects.
+  const single = total === 1;
+
   return (
     <div
-      className="nodrag relative aspect-video w-full rounded-md overflow-hidden bg-white/[0.04] border border-white/[0.08] cursor-pointer group"
+      className={
+        single
+          ? 'nodrag relative w-full max-h-72 rounded-md overflow-hidden bg-white/[0.04] border border-white/[0.08] cursor-pointer group'
+          : 'nodrag relative aspect-video w-full rounded-md overflow-hidden bg-white/[0.04] border border-white/[0.08] cursor-pointer group'
+      }
       onDoubleClick={onOpen}
       onMouseDown={(e) => e.stopPropagation()}
       title="Nhấp đúp để xem"
@@ -59,7 +69,7 @@ function Thumb({
           muted
           playsInline
           preload="metadata"
-          className="w-full h-full object-cover"
+          className={single ? 'w-full h-full max-h-72 object-contain' : 'w-full h-full object-cover'}
           onMouseEnter={(e) => {
             (e.currentTarget as HTMLVideoElement).play().catch(() => {});
           }}
@@ -71,7 +81,11 @@ function Thumb({
         />
       ) : (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={media.url} alt="" className="w-full h-full object-cover" />
+        <img
+          src={media.url}
+          alt=""
+          className={single ? 'w-full h-full max-h-72 object-contain' : 'w-full h-full object-cover'}
+        />
       )}
       {total > 1 && (
         <span className="absolute top-1 left-1 px-1 py-px rounded bg-black/60 text-[9px] text-white tabular-nums">

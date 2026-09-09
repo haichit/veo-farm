@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron';
 import { spawn, ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -55,9 +55,39 @@ function resolveResource(rel: string): string {
     case 'ffmpeg':
       // No bundled ffmpeg in dev — fall back to system PATH (`ffmpeg` from brew).
       return path.join(repoRoot, 'apps', 'desktop', 'vendor', 'ffmpeg');
+    case 'secrets.env':
+      // Dev: the repo's own root .env (already gitignored, never tracked).
+      // Packaged: a copy of that same file placed at resources/secrets.env
+      // by electron-builder's extraResources — see package.json. Never
+      // hardcode these values in source (GitHub push protection blocks it
+      // anyway, correctly).
+      return path.join(repoRoot, '.env');
     default:
       return path.join(repoRoot, rel);
   }
+}
+
+// Minimal `.env` line parser (KEY=value, no deps) — reads the secrets
+// listed in RUNTIME_ENV_KEYS from resolveResource('secrets.env') so none of
+// them ever have to live as literals in tracked source.
+function loadEnvFile(filePath: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  let text: string;
+  try {
+    text = fs.readFileSync(filePath, 'utf8');
+  } catch {
+    return out;
+  }
+  for (const line of text.split('\n')) {
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
+    if (!m) continue;
+    let val = m[2];
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    }
+    out[m[1]] = val;
+  }
+  return out;
 }
 
 function detectBraveExe(): string | null {
@@ -127,18 +157,34 @@ let mainWindow: BrowserWindow | null = null;
 // Service role key + encryption key are needed by API routes that:
 //   - encrypt cookies stored in `accounts` table (AES-256-GCM)
 //   - admin endpoints that bypass RLS to list all users
-// They are bundled here so packaged exe works without .env on user machines.
-// Risk: anyone unpacking the asar can extract them — acceptable for current
-// internal-use scope.
-const RUNTIME_ENV = {
-  NEXT_PUBLIC_SUPABASE_URL: 'https://ogcsrvdfxtxcpaogplph.supabase.co',
-  NEXT_PUBLIC_SUPABASE_ANON_KEY:
-    'sb_publishable_whdqQ22dJXtZfIs1nxcliw_vq3qQ7sw',
-  SUPABASE_SERVICE_ROLE_KEY: 'sb_secret_Dd3Z-AxtnhQLUM_Ge1Au2A_AOuBDp3m',
-  SUPABASE_STORAGE_BUCKET: 'media',
-  ENCRYPTION_KEY:
-    '6af4c1daf0ecd35176810c3457aa8b8f1a4583a04881235d3ca198866bdd3de3',
-};
+// Values come from resolveResource('secrets.env') (dev: repo root .env,
+// packaged: a copy placed at resources/secrets.env by electron-builder) —
+// NOT hardcoded here. They used to be inline literals; GitHub's push
+// protection (correctly) blocks committing real secret keys, and hardcoding
+// them also meant rotating a key required a source change + rebuild instead
+// of just editing .env.
+// Risk: anyone unpacking the asar/resources dir can still extract them —
+// acceptable for current internal-use scope, same as before.
+const RUNTIME_ENV = (() => {
+  const env = loadEnvFile(resolveResource('secrets.env'));
+  const required = [
+    'NEXT_PUBLIC_SUPABASE_URL',
+    'NEXT_PUBLIC_SUPABASE_ANON_KEY',
+    'SUPABASE_SERVICE_ROLE_KEY',
+    'ENCRYPTION_KEY',
+  ];
+  const missing = required.filter((k) => !env[k]);
+  if (missing.length > 0) {
+    log.error(`secrets.env missing required key(s): ${missing.join(', ')}`);
+  }
+  return {
+    NEXT_PUBLIC_SUPABASE_URL: env.NEXT_PUBLIC_SUPABASE_URL ?? '',
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '',
+    SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY ?? '',
+    SUPABASE_STORAGE_BUCKET: env.SUPABASE_STORAGE_BUCKET ?? 'media',
+    ENCRYPTION_KEY: env.ENCRYPTION_KEY ?? '',
+  };
+})();
 
 // ─── Worker subprocess management ───────────────────────────────────────────
 
@@ -571,7 +617,111 @@ ipcMain.handle('vf:update-install', async () => {
   return { ok: true };
 });
 
+// The node "Tải xuống" button just clicks a plain <a download> link — that's
+// a page-initiated download, and Electron's default behaviour for those is
+// to save silently into the OS Downloads folder with no prompt at all.
+// Show a native Save dialog every time instead, so the user actually picks
+// where each image/video ends up.
+//
+// Still prompts every time (so a stray click can't silently overwrite a
+// prior file / land in the wrong place), but pre-fills the dialog's folder
+// with wherever the user saved to last time — so after the first pick it's
+// just "confirm the name and hit Save" instead of re-navigating from
+// Desktop/Downloads on every single download.
+const downloadPrefsPath = path.join(app.getPath('userData'), 'download-prefs.json');
+
+function getLastDownloadDir(): string {
+  try {
+    const raw = fs.readFileSync(downloadPrefsPath, 'utf-8');
+    const dir = (JSON.parse(raw) as { lastDir?: string }).lastDir;
+    if (dir && fs.existsSync(dir)) return dir;
+  } catch {
+    /* no prefs file yet, or it's stale/corrupt — fall through to default */
+  }
+  return app.getPath('downloads');
+}
+
+function setLastDownloadDir(dir: string): void {
+  try {
+    fs.writeFileSync(downloadPrefsPath, JSON.stringify({ lastDir: dir }));
+  } catch (e) {
+    log.warn('failed to persist last download dir', e);
+  }
+}
+
+function setupDownloadPrompt(): void {
+  session.defaultSession.on('will-download', (_event, item) => {
+    const opts = {
+      title: 'Lưu file',
+      defaultPath: path.join(getLastDownloadDir(), item.getFilename()),
+    };
+    const savePath = mainWindow
+      ? dialog.showSaveDialogSync(mainWindow, opts)
+      : dialog.showSaveDialogSync(opts);
+    if (!savePath) {
+      item.cancel();
+      return;
+    }
+    setLastDownloadDir(path.dirname(savePath));
+    item.setSavePath(savePath);
+  });
+}
+
+// Bulk download ("Tải tất cả ảnh/video"): a per-file native Save dialog
+// would mean N dialogs for N files, so instead we ask ONCE for a destination
+// folder, then fetch + write every file straight into it — no download
+// manager involved (avoids re-triggering the will-download prompt above).
+function uniqueFilePath(dir: string, filename: string): string {
+  const ext = path.extname(filename);
+  const base = path.basename(filename, ext);
+  let candidate = path.join(dir, filename);
+  let n = 1;
+  while (fs.existsSync(candidate)) {
+    n += 1;
+    candidate = path.join(dir, `${base} (${n})${ext}`);
+  }
+  return candidate;
+}
+
+function sanitizeFilename(name: string): string {
+  return name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'file';
+}
+
+ipcMain.handle(
+  'vf:bulk-download',
+  async (_evt, files: Array<{ url: string; filename: string }>) => {
+    if (!mainWindow) return { ok: false, reason: 'no-window' };
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Chọn thư mục lưu',
+      properties: ['openDirectory', 'createDirectory'],
+      defaultPath: getLastDownloadDir(),
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return { ok: false, reason: 'canceled' };
+    }
+    const dir = result.filePaths[0];
+    setLastDownloadDir(dir);
+    let saved = 0;
+    let failed = 0;
+    for (const f of files) {
+      try {
+        const res = await fetch(f.url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const buf = Buffer.from(await res.arrayBuffer());
+        const dest = uniqueFilePath(dir, sanitizeFilename(f.filename));
+        fs.writeFileSync(dest, buf);
+        saved += 1;
+      } catch (e) {
+        log.warn('bulk-download: failed for', f.url, e);
+        failed += 1;
+      }
+    }
+    return { ok: true, dir, saved, failed };
+  },
+);
+
 app.whenReady().then(() => {
+  setupDownloadPrompt();
   createWindow();
   setupAutoUpdate();
 });

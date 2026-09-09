@@ -12,7 +12,7 @@ import { ApiClient } from '../../_veo3_helpers/api-client.js';
 import { acquireTokenManager, dropTokenManager } from '../../_veo3_helpers/browser-pool.js';
 import { claimAccount, releaseAccount, decryptCookies } from '../../core/account-pool.js';
 import { isCookiesExpiredError } from '../../core/account-expiry.js';
-import { uploadBuffer } from '../../core/storage.js';
+import { uploadBuffer, downloadFromUrl } from '../../core/storage.js';
 import { logger } from '../../core/logger.js';
 import {
   IMAGE_MODELS,
@@ -47,6 +47,25 @@ function mapAspect(ratio: string | undefined): keyof typeof IMAGE_ASPECT_RATIOS 
   }
 }
 
+// flow.google's uploadImage rejects with 400 when the declared mime doesn't
+// match the actual bytes. Sniff via URL extension first, then magic bytes.
+function mimeFromUrl(url: string, buf: Buffer): string {
+  const u = url.toLowerCase();
+  if (u.includes('.png')) return 'image/png';
+  if (u.includes('.webp')) return 'image/webp';
+  if (u.includes('.gif')) return 'image/gif';
+  if (u.includes('.jpg') || u.includes('.jpeg')) return 'image/jpeg';
+  if (buf.length >= 8) {
+    if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
+    if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+    if (
+      buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+      buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50
+    ) return 'image/webp';
+  }
+  return 'image/png';
+}
+
 function mapModel(model: string | undefined): keyof typeof IMAGE_MODELS {
   if (model === 'nano_banana_pro') return 'nano_banana_pro';
   if (model === 'imagen_4') return 'imagen_4';
@@ -66,6 +85,9 @@ export interface GenerateImageNodeInput {
     /** Optional pinned account id — bypasses round-robin for this node. */
     accountId?: string | null;
   };
+  /** Reference image(s) wired into the node's ref-image port(s) — only the
+   * first is currently sent (Flow's ogiZ0b payload takes a single ref). */
+  refImageUrls?: string[];
   /** Owner of the run — used for storage key prefix and account claim. */
   userId: string;
   /** Parent job id — used for storage key prefix. */
@@ -121,10 +143,22 @@ export async function runGenerateImageNode(
       projectId: projectId ?? null,
     });
 
+    // Upload the ref image (if wired in) so it lives in flow.google — the
+    // API takes a mediaId, not a raw URL. Was silently dropped before: the
+    // node accepted a ref-image connection but never actually sent it,
+    // so the model had nothing to match "use the reference image" against.
+    let refImageId: string | undefined;
+    const refUrl = input.refImageUrls?.[0];
+    if (refUrl) {
+      const buf = await downloadFromUrl(refUrl);
+      refImageId = await client.uploadImageV2(buf, mimeFromUrl(refUrl, buf));
+    }
+
     const fifeUrls = await client.generateImages(input.prompt, {
       aspectRatio: mapAspect(input.config.ratio),
       count: Math.max(1, Math.min(input.config.quantity ?? 1, 4)),
       model: mapModel(input.config.imageModel),
+      referenceImages: refImageId ? [refImageId] : undefined,
     });
 
     logger.info({ urls: fifeUrls.length }, 'generate_image: got fifeUrls, downloading');

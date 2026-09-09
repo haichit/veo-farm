@@ -13,6 +13,7 @@ import { GenerateImageNode } from './GenerateImageNode';
 import { GenerateVideoNode } from './GenerateVideoNode';
 import { MergeVideoNode } from './MergeVideoNode';
 import { RemoveLogoNode } from './RemoveLogoNode';
+import { ExtractLastFrameNode } from './ExtractLastFrameNode';
 import { DownloadNode } from './DownloadNode';
 import { FrameNode } from './FrameNode';
 
@@ -28,6 +29,7 @@ export const customNodeTypes: NodeTypes = {
   generate_video: GenerateVideoNode,
   merge_video: MergeVideoNode,
   remove_logo: RemoveLogoNode,
+  extract_last_frame: ExtractLastFrameNode,
   download: DownloadNode,
   frame: FrameNode,
 };

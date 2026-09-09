@@ -3,6 +3,7 @@
 import { Download, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { PreviewMedia } from '@/lib/builder/flow-store';
+import { downloadMediaUrl, inferMediaFilename } from '@/lib/download-media';
 
 interface LightboxProps {
   media: PreviewMedia[];
@@ -32,12 +33,9 @@ export function Lightbox({ media, startIndex, onClose }: LightboxProps) {
   if (!item) return null;
 
   function downloadActive() {
-    const a = document.createElement('a');
-    a.href = item.url;
-    a.download = inferFilename(item, idx);
-    a.target = '_blank';
-    a.rel = 'noopener';
-    a.click();
+    downloadMediaUrl(item.url, inferMediaFilename(item.url, item.kind, idx + 1)).catch((e) => {
+      alert(`Tải xuống thất bại: ${(e as Error).message ?? e}`);
+    });
   }
 
   return (
@@ -103,16 +101,4 @@ export function Lightbox({ media, startIndex, onClose }: LightboxProps) {
       )}
     </div>
   );
-}
-
-function inferFilename(m: PreviewMedia, idx: number): string {
-  const ext = m.kind === 'video' ? 'mp4' : 'png';
-  try {
-    const u = new URL(m.url);
-    const last = u.pathname.split('/').pop();
-    if (last && last.includes('.')) return last;
-  } catch {
-    /* not a URL — data: or relative */
-  }
-  return `veo-farm-${m.kind}-${idx + 1}.${ext}`;
 }

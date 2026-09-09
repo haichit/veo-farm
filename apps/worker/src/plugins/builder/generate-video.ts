@@ -158,118 +158,46 @@ export async function runGenerateVideoNode(
     if (mode === 'FRAME') {
       if (input.refs?.startImageUrl) {
         const buf = await downloadFromUrl(input.refs.startImageUrl);
-        const up = await client.uploadImage(buf, mimeFromUrl(input.refs.startImageUrl, buf));
-        startImageId = up.mediaId;
+        startImageId = await client.uploadImageV2(buf, mimeFromUrl(input.refs.startImageUrl, buf));
       }
       if (input.refs?.endImageUrl) {
         const buf = await downloadFromUrl(input.refs.endImageUrl);
-        const up = await client.uploadImage(buf, mimeFromUrl(input.refs.endImageUrl, buf));
-        endImageId = up.mediaId;
+        endImageId = await client.uploadImageV2(buf, mimeFromUrl(input.refs.endImageUrl, buf));
       }
     } else if (mode === 'REF') {
       for (const url of input.refs?.referenceImageUrls ?? []) {
         const buf = await downloadFromUrl(url);
-        const up = await client.uploadImage(buf, mimeFromUrl(url, buf));
-        refMediaIds.push(up.mediaId);
+        refMediaIds.push(await client.uploadImageV2(buf, mimeFromUrl(url, buf)));
       }
     }
+
+    // Flow's new model ids read `veo_3_1_<mode>_<tier>[_low_priority]`
+    // (confirmed live: "veo_3_1_r2v_lite_low_priority", and — as of the
+    // 2026-09-07 HAR capture — "veo_3_1_interpolation_lite_low_priority" for
+    // start+end frame together). Map the Builder's 'veo31_lite' /
+    // 'veo31_fast_lower' / etc. onto tier + lowPriority.
+    const lowPriority = (input.config.videoModel ?? '').endsWith('_lower');
+    const tierName = model === 'veo_3_1_fast' ? 'fast' : model === 'veo_3_1_quality' ? 'quality' : 'lite';
 
     logger.info(
-      {
-        mode,
-        model,
-        tier,
-        hasStart: !!startImageId,
-        hasEnd: !!endImageId,
-        refs: refMediaIds.length,
-      },
-      'generate_video: starting API call',
+      { mode, tier: tierName, lowPriority, hasStart: !!startImageId, hasEnd: !!endImageId, refs: refMediaIds.length },
+      'generate_video: starting API call (batchexecute)',
     );
 
-    const callGenerate = () =>
-      client.generateVideo(input.prompt, {
-        aspectRatio: mapAspect(input.config.ratio),
-        count: Math.max(1, Math.min(input.config.quantity ?? 1, 4)),
-        model,
-        startImageId,
-        endImageId,
-        referenceImages: refMediaIds.length > 0 ? refMediaIds : undefined,
-      });
-
-    let startResult: Awaited<ReturnType<typeof callGenerate>>;
-    try {
-      startResult = await callGenerate();
-    } catch (apiErr) {
-      // Account doesn't have access to the chosen model (typically free Google
-      // accounts that picked Fast/Quality — those need a paid plan). Retry
-      // with Lite, which every tier can access. We swallow the original error
-      // so the UI sees the working fallback path instead of an opaque 403.
-      const apiMsg = (apiErr as Error)?.message ?? String(apiErr);
-      const isModelDenied =
-        apiMsg.includes('PUBLIC_ERROR_MODEL_ACCESS_DENIED') ||
-        (apiMsg.includes('AUTH_ERROR_403') && apiMsg.includes('PERMISSION_DENIED'));
-      if (!isModelDenied || model === 'veo_3_1_lite') throw apiErr;
-
-      const prevModel = model;
-      const prevTier = tier;
-      model = 'veo_3_1_lite';
-      tier = 'PAYGATE_TIER_ONE';
-      client = new ApiClient(lease.tm, {
-        paygateTier: tier,
-        projectId: projectId ?? null,
-      });
-      logger.warn(
-        { prevModel, prevTier, model, tier },
-        'generate_video: model access denied — falling back to Lite',
-      );
-      startResult = await callGenerate();
-    }
-
-    const media = (startResult.media ?? []).map((m) => ({
-      name: m.name,
-      projectId: m.projectId,
-    }));
-    if (media.length === 0) throw new Error('generate_video: no media items returned');
-
-    logger.info({ count: media.length }, 'generate_video: polling status');
-    const pollResult = await client.waitForVideos(media, {
-      onProgress: (_data, elapsed) => {
-        if (elapsed % 30 === 0) logger.info({ elapsed }, 'generate_video: polling…');
-      },
+    const items = await client.generateVideoV2(input.prompt, {
+      tier: tierName,
+      lowPriority,
+      count: Math.max(1, Math.min(input.config.quantity ?? 1, 4)),
+      refImageId: refMediaIds[0],
+      startImageId,
+      endImageId,
+      aspectRatio: mapAspect(input.config.ratio),
     });
 
-    // Collect every successful clip — Flow can return multiple if count > 1.
-    const successes = (pollResult.media ?? []).filter(
-      (m) =>
-        m.mediaMetadata?.mediaStatus?.mediaGenerationStatus ===
-        'MEDIA_GENERATION_STATUS_SUCCESSFUL',
-    );
-    if (successes.length === 0) {
-      const reasons = pollResult.media
-        ?.map((m) => m.mediaMetadata?.mediaStatus?.failureReason)
-        .filter(Boolean);
-      throw new Error(
-        `generate_video: all clips failed${reasons?.length ? ': ' + reasons.join(', ') : ''}`,
-      );
-    }
-
+    logger.info({ count: items.length }, 'generate_video: polling for signed URL');
     const uploaded: Array<{ url: string; kind: 'video' }> = [];
-    for (const success of successes) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const sa = success as any;
-      const mediaName: string | undefined = sa.name ?? sa.video?.operation?.name;
-      const successProjectId: string | undefined = sa.projectId ?? projectId;
-      const workflowId: string | undefined = sa.workflowId;
-      if (!mediaName || !successProjectId || !workflowId) {
-        logger.warn(
-          { mediaName, successProjectId, workflowId },
-          'generate_video: missing identifiers, skipping clip',
-        );
-        continue;
-      }
-
-      logger.info({ mediaName }, 'generate_video: resolving signed CDN URL');
-      const videoUri = await client.getVideoUrl(mediaName, successProjectId, workflowId);
+    for (const item of items) {
+      const videoUri = await client.pollMediaUrl(item.mediaId, item.projectId ?? projectId!);
 
       const buffer: Buffer = await new Promise((resolveBuf, rejectBuf) => {
         const chunks: Buffer[] = [];

@@ -3,7 +3,12 @@
 // Reference: SPEC_REPLICA_BACKEND.md sections 18.2 + 18.5.
 
 export const API_BASE = 'https://aisandbox-pa.googleapis.com';
-export const LABS_BASE = 'https://labs.google';
+// Google moved Flow's authenticated app + session cookies off labs.google
+// onto its own domain (confirmed live Sep 2026 — labs.google/fx/.../tools/flow
+// now serves only the logged-out marketing page; real session cookies like
+// __Secure-OSID are scoped to flow.google.com). Keep the name LABS_BASE since
+// it's referenced everywhere as "the Flow origin", but point it at the new host.
+export const LABS_BASE = 'https://flow.google.com';
 export const STORAGE_BASE = 'https://storage.googleapis.com/ai-sandbox-videofx/';
 
 export const API_KEY = 'AIzaSyBtrm0o5ab1c-Ec8ZuLcGt3oJAA5VWt3pY';

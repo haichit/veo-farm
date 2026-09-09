@@ -12,6 +12,7 @@ import {
 import { getNodeInputPorts, inputHandleId, outputHandleId } from '@/lib/builder/dynamic-ports';
 import { useFlowStore, type BuilderNodeData } from '@/lib/builder/flow-store';
 import { useWorkflowRun } from '@/lib/builder/use-workflow-run';
+import { downloadMediaUrl, inferMediaFilename } from '@/lib/download-media';
 import { PreviewMedia } from '../preview/PreviewMedia';
 
 interface BaseNodeProps extends NodeProps {
@@ -49,18 +50,15 @@ export function BaseNode(props: BaseNodeProps) {
   // so worker stops after this node executes (saves time when iterating on
   // a single branch). Caller can override with their own onRun.
   const effectiveRun = onRun ?? (() => void startRun(id));
-  // Default Download click → open first media in a new tab.
+  // Default Download click → fetch + save the first media item.
   const effectiveDownload =
     onDownload ??
     (() => {
       const m = previewMedia[0];
       if (!m) return;
-      const a = document.createElement('a');
-      a.href = m.url;
-      a.target = '_blank';
-      a.rel = 'noopener';
-      a.download = '';
-      a.click();
+      downloadMediaUrl(m.url, inferMediaFilename(m.url, m.kind, id)).catch((e) => {
+        alert(`Tải xuống thất bại: ${(e as Error).message ?? e}`);
+      });
     });
 
   const dynamicInputs = useMemo(() => {

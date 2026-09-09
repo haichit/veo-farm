@@ -10,6 +10,12 @@ export interface WorkflowNodeJSON {
     config?: Record<string, unknown>;
     /** Optional label override (Frame node uses this for the group title). */
     label?: string;
+    /** Generated image/video output(s) — survives save/reload so results don't disappear. */
+    previewMedia?: Array<{ url: string; kind: 'image' | 'video'; mime?: string }>;
+    /** Generated text output (gemini_prompt/gemini_vision nodes). */
+    lastOutputText?: string;
+    /** Which Frame group node this node visually belongs to (custom grouping, not RF's parentId). */
+    frameId?: string;
   };
   /** Optional dimensions — Frame node + resizable Prompt nodes persist size. */
   width?: number;

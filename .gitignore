@@ -20,6 +20,13 @@ build/
 
 # Claude Code worktrees
 .claude/worktrees/
+.claude/
+
+# electron-builder output
+apps/desktop/release/
+apps/desktop/release2/
+apps/desktop/release3/
+apps/desktop/release4/
 
 # Logs
 *.log

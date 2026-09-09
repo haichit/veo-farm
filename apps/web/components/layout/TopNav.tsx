@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   Key,
+  KeyRound,
   Layers3,
   ListChecks,
   LayoutDashboard,
@@ -38,6 +39,7 @@ export function TopNav({ email }: TopNavProps) {
     { href: '/canvas', label: 'Canvas', icon: Workflow },
     { href: '/accounts', label: 'Accounts', icon: Key },
     { href: '/runs', label: 'Runs', icon: ListChecks },
+    { href: '/api-keys', label: 'API Keys', icon: KeyRound },
     ...(isAdmin
       ? [{ href: '/admin/users', label: 'Admin', icon: Shield } as const]
       : []),

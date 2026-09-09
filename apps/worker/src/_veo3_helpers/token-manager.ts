@@ -167,7 +167,7 @@ export class TokenManager {
       console.error('[browser:pageerror]', (e as Error)?.message ?? e);
     });
 
-    await this._page.goto(`${LABS_BASE}/fx/vi/tools/flow`, {
+    await this._page.goto(await this._resolveAppUrl(), {
       waitUntil: 'domcontentloaded',
       timeout: 90_000,
     });
@@ -199,6 +199,21 @@ export class TokenManager {
    */
   invalidateBearer(): void {
     this._bearerToken = null;
+  }
+
+  /**
+   * `${LABS_BASE}/` is the logged-out marketing splash regardless of session
+   * state, so it never makes the app bootstrap XHR that getToken() (legacy,
+   * unused by the current batchexecute-based generation path — kept only
+   * for the old REST plugins) waits for. Used to also probe `/fx/api/trpc/
+   * project.{list,create}Project` here to land on a real project page, but
+   * that whole tRPC API was retired along with the rest of the old Flow
+   * frontend (Sep 2026) — those calls always 400/405 now. The current
+   * generation path (ApiClient._ensureProject / _getBatchSession) resolves
+   * project URLs its own way and doesn't call this at all.
+   */
+  private async _resolveAppUrl(): Promise<string> {
+    return LABS_BASE + '/';
   }
 
   /**
@@ -244,8 +259,8 @@ export class TokenManager {
     // a click on a UI element that may have moved or not be present.
     try {
       const url = this._page.url();
-      if (!/labs\.google\/fx\/.*\/tools\/flow/.test(url)) {
-        await this._page.goto(LABS_BASE + '/fx/vi/tools/flow', {
+      if (!/\/project\//.test(url)) {
+        await this._page.goto(await this._resolveAppUrl(), {
           waitUntil: 'domcontentloaded',
           timeout: 60_000,
         });
@@ -263,7 +278,7 @@ export class TokenManager {
       if (this._bearerToken) return this._bearerToken;
       await sleep(300);
     }
-    throw new Error('Failed to extract Bearer token from labs.google requests');
+    throw new Error(`Failed to extract Bearer token from ${LABS_BASE} requests`);
   }
 
   /**
@@ -338,7 +353,7 @@ export class TokenManager {
     // fingerprinted as a bot.
     if (this._page) {
       try {
-        await this._page.goto(LABS_BASE + '/fx/vi/tools/flow', {
+        await this._page.goto(await this._resolveAppUrl(), {
           waitUntil: 'domcontentloaded',
           timeout: 60_000,
         });

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { useFlowStore } from './flow-store';
 
@@ -17,7 +17,18 @@ export function useKeyboardShortcuts() {
   const saveWorkflow = useFlowStore((s) => s.saveWorkflow);
   const closeAlbum = useFlowStore((s) => s.closeAlbum);
   const albumOpen = useFlowStore((s) => s.albumOpen);
-  const { fitView } = useReactFlow();
+  const { fitView, screenToFlowPosition } = useReactFlow();
+
+  // Track the mouse in screen coords so Cmd/Ctrl+V can paste under the
+  // cursor instead of always landing near the copied nodes' original spot.
+  const lastMouse = useRef<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      lastMouse.current = { x: e.clientX, y: e.clientY };
+    }
+    window.addEventListener('mousemove', onMove);
+    return () => window.removeEventListener('mousemove', onMove);
+  }, []);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -61,9 +72,12 @@ export function useKeyboardShortcuts() {
         copySelected();
         return;
       }
-      // Cmd/Ctrl + V — paste.
+      // Cmd/Ctrl + V — paste under the cursor's last known position.
       if (mod && e.key.toLowerCase() === 'v') {
-        paste();
+        const cursor = lastMouse.current
+          ? screenToFlowPosition(lastMouse.current)
+          : undefined;
+        paste(cursor);
         return;
       }
       // Cmd/Ctrl + S — save.
@@ -101,6 +115,7 @@ export function useKeyboardShortcuts() {
     redo,
     copySelected,
     paste,
+    screenToFlowPosition,
     removeNodes,
     selectMany,
     selectNode,

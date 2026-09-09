@@ -78,14 +78,22 @@ export function BuilderCanvas() {
   useKeyboardShortcuts();
   useJobSubscription(currentJobId);
 
-  // One-shot migration on mount: any node visually inside a frame but
-  // missing data.frameId gets attached. Covers persisted state from
-  // before the data.frameId mechanism existed so old workflows behave
-  // correctly without making the user re-drag every node.
-  const migrationDoneRef = useRef(false);
+  // Migration: any node visually inside a frame but missing data.frameId
+  // gets attached. Covers persisted state from before the data.frameId
+  // mechanism existed (or nodes restored straight from job records, which
+  // never carry frameId at all) so old/restored workflows behave correctly
+  // without making the user re-drag every node into its frame.
+  //
+  // Re-runs per loaded workflow (keyed off currentWorkflowId), not just once
+  // ever — BuilderCanvas doesn't remount when switching workflows via the
+  // sidebar list or /canvas?wf=, so a plain mount-once guard only migrated
+  // whichever workflow happened to be loaded first and silently skipped
+  // every workflow loaded afterward in the same session.
+  const currentWorkflowId = useFlowStore((s) => s.currentWorkflowId);
+  const migratedForIdRef = useRef<string | null | undefined>(undefined);
   useEffect(() => {
-    if (migrationDoneRef.current) return;
-    migrationDoneRef.current = true;
+    if (migratedForIdRef.current === currentWorkflowId) return;
+    migratedForIdRef.current = currentWorkflowId;
     const all = useFlowStore.getState().nodes;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const frames = all.filter((n: any) => n.type === 'frame');
@@ -117,7 +125,7 @@ export function BuilderCanvas() {
       console.log('[builder] frame membership migrated for existing nodes');
       useFlowStore.getState().setNodes(next);
     }
-  }, []);
+  }, [currentWorkflowId]);
 
   const { screenToFlowPosition } = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement>(null);

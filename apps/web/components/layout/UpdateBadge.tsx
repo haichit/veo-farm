@@ -14,6 +14,9 @@ type UpdateState =
 
 interface DesktopBridge {
   getAppVersion?: () => Promise<string>;
+  bulkDownload?: (
+    files: Array<{ url: string; filename: string }>,
+  ) => Promise<{ ok: boolean; reason?: string; dir?: string; saved?: number; failed?: number }>;
   update?: {
     getStatus: () => Promise<UpdateState>;
     check: () => Promise<{ ok: boolean; reason?: string }>;

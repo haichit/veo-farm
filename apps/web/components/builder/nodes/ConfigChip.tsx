@@ -42,8 +42,13 @@ export function ConfigChip<T extends string | number>({
       if (menuRef.current?.contains(t)) return;
       setOpen(false);
     };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
+    // Capture phase: React Flow's pane/drag handling calls stopPropagation()
+    // on its own mousedown handlers (for panning/selection), which swallows
+    // a bubble-phase document listener before it ever fires — so clicking
+    // anywhere on the canvas silently failed to close this dropdown. Capture
+    // runs top-down before any of that, so it always sees the click.
+    document.addEventListener('mousedown', onDoc, true);
+    return () => document.removeEventListener('mousedown', onDoc, true);
   }, [open]);
 
   const selected = options.find((o) => o.value === value);

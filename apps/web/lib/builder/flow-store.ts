@@ -69,6 +69,36 @@ export interface SavedWorkflowSummary {
   updated_at: string;
 }
 
+// Fills in data.frameId for any non-frame node whose centre sits inside a
+// frame's bounds but has no frameId recorded yet — covers graphs saved
+// before data.frameId existed, or nodes restored straight from a job's
+// flow_graph snapshot (which never carries frameId at all). Runs directly in
+// loadWorkflow (rather than relying solely on a client effect elsewhere)
+// so the fix-up is deterministic on every load and isn't racy against
+// component mount/effect timing.
+function backfillFrameIds(nodes: BuilderNode[]): BuilderNode[] {
+  const frames = nodes.filter((n) => n.type === 'frame');
+  if (frames.length === 0) return nodes;
+  let changed = false;
+  const next = nodes.map((n) => {
+    if (n.type === 'frame') return n;
+    if (n.data?.frameId) return n;
+    const cx = n.position.x + (n.width ?? 240) / 2;
+    const cy = n.position.y + (n.height ?? 100) / 2;
+    const containing = frames.find((f) => {
+      const fx = f.position.x;
+      const fy = f.position.y;
+      const fw = f.width ?? (f.data?.config as any)?.width ?? 500;
+      const fh = f.height ?? (f.data?.config as any)?.height ?? 400;
+      return cx >= fx && cx <= fx + fw && cy >= fy && cy <= fy + fh;
+    });
+    if (!containing) return n;
+    changed = true;
+    return { ...n, data: { ...n.data, frameId: containing.id } };
+  });
+  return changed ? next : nodes;
+}
+
 interface HistorySnapshot {
   nodes: BuilderNode[];
   edges: Edge[];
@@ -102,6 +132,15 @@ interface FlowStoreState {
    *  node, auto-update when user pastes key into any gemini node editor.
    *  Persisted via the persist middleware so it survives F5. */
   defaultGeminiApiKey: string;
+
+  /** Last config values the user set per node type (e.g. the image/video
+   *  model + ratio + quantity picked on the last generate_image/video node
+   *  touched) — new nodes of the same type start from these instead of the
+   *  hard-coded defaults, so switching a setting once carries forward for
+   *  the rest of the session. `accountId` is deliberately excluded (see
+   *  updateNodeConfig) so a pinned account doesn't silently propagate.
+   *  Persisted so it survives F5 too. */
+  lastConfigByType: Partial<Record<string, Record<string, unknown>>>;
 
   // Album overlay
   albumOpen: boolean;
@@ -249,6 +288,7 @@ export const useFlowStore = create<FlowStoreState>()(
   currentWorkflowName: 'Workflow mới',
   savedWorkflows: [],
   defaultGeminiApiKey: '',
+  lastConfigByType: {},
 
   albumOpen: false,
   albumMedia: [],
@@ -285,10 +325,22 @@ export const useFlowStore = create<FlowStoreState>()(
     if (!def) throw new Error(`Unknown node type: ${type}`);
     get().pushHistory();
     const id = makeId(type);
+    // Start from the hard-coded defaults, then layer in whatever the user
+    // last configured on a node of this type this session (model, ratio,
+    // quantity, etc.) — `accountId` is excluded so a pinned account never
+    // silently carries over to a new node.
+    const remembered = { ...(get().lastConfigByType[type] ?? {}) };
+    delete remembered.accountId;
+    const config = { ...def.defaults, ...remembered } as Record<string, unknown>;
+    // "Khung Nhóm" (frame/group box) auto-numbers itself so multiple groups
+    // in one workflow are distinguishable at a glance.
+    if (type === 'frame') {
+      const frameCount = get().nodes.filter((n) => n.type === 'frame').length;
+      config.name = `Khung Nhóm ${frameCount + 1}`;
+    }
     // Auto-fill Gemini API key on new gemini_* nodes so user doesn't have
     // to paste it every time. (gemini_prompt_kie uses a different vendor's
     // key — skip auto-fill for that one.)
-    const config = { ...def.defaults } as Record<string, unknown>;
     const savedGemini = get().defaultGeminiApiKey;
     if (savedGemini && (type === 'gemini_prompt' || type === 'gemini_vision')) {
       config.apiKey = savedGemini;
@@ -319,12 +371,28 @@ export const useFlowStore = create<FlowStoreState>()(
     })),
   updateNodeConfig: (id, patch) => {
     get().pushHistory();
+    const node = get().nodes.find((n) => n.id === id);
     set((s) => ({
       nodes: s.nodes.map((n) =>
         n.id === id
           ? { ...n, data: { ...n.data, config: { ...(n.data?.config ?? {}), ...patch } } }
           : n,
       ),
+      // Remember this for the next node of the same type — see addNode.
+      // `accountId` is excluded (pinned account shouldn't silently spread
+      // to new nodes) and `text`/prompt-body fields aren't part of `patch`
+      // here (those go through updateNodeData instead), so this only ever
+      // captures chip-style settings (model/ratio/quantity/...).
+      ...(node
+        ? (() => {
+            const merged: Record<string, unknown> = {
+              ...(s.lastConfigByType[node.type ?? ''] ?? {}),
+              ...patch,
+            };
+            delete merged.accountId;
+            return { lastConfigByType: { ...s.lastConfigByType, [node.type ?? '']: merged } };
+          })()
+        : {}),
     }));
   },
   removeNodes: (ids) => {
@@ -589,12 +657,23 @@ export const useFlowStore = create<FlowStoreState>()(
     const payload: WorkflowJSON = {
       version: '1.0',
       name: name ?? currentWorkflowName,
-      // Strip ephemeral status fields — only persist config + position + structure.
+      // Strip ephemeral status fields (status/error/progress — re-derived on
+      // each run) but keep previewMedia/lastOutputText/frameId: these used to
+      // get dropped here, so every "Lưu" silently wiped out generated
+      // images/videos and frame membership from the saved workflow even
+      // though the live canvas still showed them — a save right after a
+      // successful run looked fine until the next reload/reopen.
       nodes: nodes.map((n) => ({
         id: n.id,
         type: n.type ?? 'prompt',
         position: n.position,
-        data: { config: n.data?.config ?? {}, label: n.data?.label },
+        data: {
+          config: n.data?.config ?? {},
+          label: n.data?.label,
+          previewMedia: n.data?.previewMedia,
+          lastOutputText: n.data?.lastOutputText,
+          frameId: n.data?.frameId,
+        },
         width: n.width,
         height: n.height,
         parentId: (n as any).parentId,
@@ -655,7 +734,18 @@ export const useFlowStore = create<FlowStoreState>()(
       id: n.id,
       type: n.type,
       position: n.position,
-      data: { config: n.data?.config ?? {}, label: n.data?.label, status: 'idle' },
+      data: {
+        config: n.data?.config ?? {},
+        label: n.data?.label,
+        status: 'idle',
+        // Loading a saved workflow used to drop these, so any node that had
+        // already generated media/text came back with an empty preview —
+        // easy to mistake for "the outputs got deleted" when they're really
+        // just not being read back in.
+        previewMedia: (n.data as { previewMedia?: PreviewMedia[] } | undefined)?.previewMedia,
+        lastOutputText: (n.data as { lastOutputText?: string } | undefined)?.lastOutputText,
+        frameId: (n.data as { frameId?: string } | undefined)?.frameId,
+      },
       width: n.width,
       // Only keep stored height for frames — other nodes auto-grow with content.
       ...(n.type === 'frame' && n.height ? { height: n.height } : {}),
@@ -671,7 +761,7 @@ export const useFlowStore = create<FlowStoreState>()(
     set({
       currentWorkflowId: wf.id,
       currentWorkflowName: wf.name,
-      nodes: restoredNodes,
+      nodes: backfillFrameIds(restoredNodes),
       edges: restoredEdges,
       past: [],
       future: [],
@@ -751,7 +841,7 @@ export const useFlowStore = create<FlowStoreState>()(
           targetHandle: e.targetHandle || undefined,
         }));
         set({
-          nodes: restoredNodes,
+          nodes: backfillFrameIds(restoredNodes),
           edges: restoredEdges,
           currentWorkflowId: null,
           currentWorkflowName: wf.name || 'Workflow đã import',
@@ -821,6 +911,7 @@ export const useFlowStore = create<FlowStoreState>()(
         currentWorkflowId: state.currentWorkflowId,
         currentWorkflowName: state.currentWorkflowName,
         defaultGeminiApiKey: state.defaultGeminiApiKey,
+        lastConfigByType: state.lastConfigByType,
       }),
       version: 3,
     },

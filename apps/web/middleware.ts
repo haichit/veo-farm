@@ -8,6 +8,18 @@ const PUBLIC_PATHS = [
   '/reset-password',
   '/auth/callback',
   '/api/health',
+  // API-key-reachable routes: no session cookie on an external script's
+  // request, so the cookie-only check below would otherwise redirect it to
+  // /login instead of ever reaching the route handler. Each of these does
+  // its own auth via resolveAuth() (session cookie OR Bearer API key) —
+  // this just lets requests with neither reach that check and get a clean
+  // 401 JSON instead of an HTML redirect. Key management itself
+  // (/api/api-keys) is intentionally NOT here — it stays session-only.
+  '/api/run-workflow-builder',
+  '/api/workflows',
+  '/api/jobs-queue',
+  '/api/runs',
+  '/api/workflow-builder-stop',
 ];
 
 const AUTH_PAGES = new Set(['/login', '/signup', '/forgot-password']);

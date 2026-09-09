@@ -1,17 +1,17 @@
 import { NextResponse } from 'next/server';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { resolveAuth } from '@/lib/api-auth';
 import type { WorkflowJSON } from '@veo-farm/shared';
 
 // Launch a Builder Canvas run.
 // Body: { workflow: WorkflowJSON, workflowId?: string (when saved) }
 // → inserts a `jobs` row with flow_graph + workflow_id; the worker picks
 //   up by status='pending' and walks the graph in topological order.
+// Reachable from the Builder Canvas UI (session cookie) or externally via
+// an `Authorization: Bearer <api key>` header (see /api/api-keys).
 export async function POST(req: Request) {
-  const sb = createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await sb.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
+  const auth = await resolveAuth(req);
+  if (!auth) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
+  const { userId, sb } = auth;
 
   const body = await req.json().catch(() => ({}));
   const wf = body?.workflow as WorkflowJSON | undefined;
@@ -52,7 +52,7 @@ export async function POST(req: Request) {
   const { data, error } = await sb
     .from('jobs')
     .insert({
-      user_id: user.id,
+      user_id: userId,
       flow_id: null,
       workflow_id: typeof body?.workflowId === 'string' ? body.workflowId : null,
       flow_graph: {
